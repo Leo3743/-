@@ -2339,6 +2339,43 @@ FileChannel：transferTo（把FileChannel中的数据拷贝到另外一个Channe
 
 ![](img\seletor.jpg)
 
+NIO有哪些优势：
+
+- 事件驱动模型
+- 避免多线程
+- 单线程处理多任务
+- 非阻塞I/O，I/O读写不再阻塞
+- 基于block的传输，通常比基于流的传输更高效
+- 更高级的IO函数，Zero Copy
+- I/O多路复用大大提高了Java网络应用的可伸缩性和实用性
+
+零拷贝（Zero Copy）：
+
+传统数据传输方式：
+
+```
+File.read(fileDesc,buf,len);
+Socket.send(socket,buf,len);
+
+1、read()的调用引起了从用户态到内核态的切换，内部是通过sys_read()（或者类似的方法）发起对文件数据的读取。数据的第一次复制是通过DMA（直接内存访问）将磁盘上的数据复制到内核空间的缓冲区中；
+2、数据从内核空间的缓冲区复制到用户空间的缓冲区后，read()方法也就返回了。此时内核态又切换回用户态，现在数据也已经复制到了用户地址空间的缓存中；
+3、socket的send()方法的调用又会引起用户态到内核的切换，第三次数据复制又将数据从用户空间缓冲区复制到了内核空间的缓冲区，这次数据被放在了不同于之前的内核缓冲区中，这个缓冲区与数据将要被传输到的socket关联；
+4、send()系统调用返回后，就产生了第四次用户态和内核态的切换。随着DMA单独异步的将数据从内核态的缓冲区中传输到协议引擎发送到网络上，有了第四次数据复制。
+```
+
+Zero Copy的数据传输方式：
+
+`java.nio.channels.FileChannel`中定义了两个方法：transferTo( )和 transferFrom( )。
+
+transferTo( )和 transferFrom( )方法允许将一个通道交叉连接到另一个通道，而不需要通过一个中间缓冲区来传递数据。只有 FileChannel 类有这两个方法，因此 **channel-to-channel** 传输中通道之一必须是 FileChannel。不能在 socket 通道之间直接传输数据，不过 socket 通道实现 `WritableByteChannel` 和 `ReadableByteChannel` 接口，因此文件的内容可以用 `transferTo( )` 方法传输给一个 socket 通道，或者也可以用 transferFrom( )方法将数据从一个 socket 通道直接读取到一个文件中。
+
+![](img/zero-copy1.png)
+
+使用transferTo()方式所经历的步骤：
+
+1. transferTo调用会引起DMA将文件内容复制到读缓冲区(内核空间的缓冲区)，然后数据从这个缓冲区复制到另一个与socket输出相关的内核缓冲区中；
+2. 第三次数据复制就是DMA把socket关联的缓冲区中的数据复制到协议引擎上发送到网络上。
+
 ### IO多路复用
 
 两种IO多路复用方案：Reactor、Proactor。I/O多路复用机制都依赖于一个**事件多路分离器(Event Demultiplexer)**。分离器对象可将来自事件源的I/O事件分离出来，并分发到对应的read/write**事件处理器(Event Handler)**。开发人员预先注册需要处理的事件及其事件处理器（或回调函数）；事件分离器负责将请求事件传递给事件处理器。**两个与事件分离器有关的模式是Reactor和Proactor。**
@@ -2353,15 +2390,46 @@ Reactor模式采用同步I/O，而Proactor采用异步I/O。
 Reactor模型：
 
 - Reactor单线程模型
-- 
+
+  ![](img/reactor单线程.png)
+
+  这是最简单的单Reactor单线程模型。Reactor线程负责多路分离套接字、accept新连接，并分派请求到处理器链中。该模型适用于处理器链中业务处理组件能快速完成的场景。不过，这种单线程模型不能充分利用多核资源，所以实际使用的不多。
+
+- Reactor多线程模型
+
+  ![](img/reactor-multi.png)
+
+​		Reactor多线程模型就是将Handler中的IO操作和非IO操作分开，操作IO的线程称为IO线程，非IO操作的线程称为		工作线程。这样的话，客户端的请求会直接被丢到线程池中，客户端发送请求就不会堵塞。但是当用户进一步增		加的时候，Reactor会出现瓶颈！因为Reactor既要处理IO操作请求，又要响应连接请求。为了分担Reactor的负		担，所以引入了主从Reactor模型。
+
+- 主从Reactor多线程模型
+
+  ![](img/reactor-master.png)
+
+**select和epoll**
+
+主从Reactor多线程模型是将Reactor分成两部分，mainReactor负责监听server socket，accept新连接，并将建立的socket分派给subReactor。subReactor负责多路分离已连接的socket，读写网络数据，对业务处理功能，其扔给worker线程池完成。通常，subReactor个数上可与CPU个数等同。可见，主Reactor用于响应连接请求，从Reactor用于处理IO操作请求。
+
+当需要读两个以上的I/O的时候，如果使用阻塞式的I/O，那么可能长时间的阻塞在一个描述符上面，另外的描述符虽然有数据但是不能读出来，这样实时性不能满足要求，解决方案有I/O多路复用：
+
+先构造一张有关描述符的列表（epoll中为队列），然后调用一个函数，直到这些描述符中的一个准备好时才返回，返回时告诉进程哪些I/O就绪。**select和epoll**这两个机制都是多路I/O机制的解决方案，select为POSIX标准中的，而epoll为Linux所特有的。
+
+select和epoll的区别：
+
+1. select的句柄数目受限，在linux/posix_types.h头文件有这样的声明：`#define __FD_SETSIZE 1024`表示select最多同时监听1024个fd。而epoll没有，它的限制是最大的打开文件句柄数目；
+2. epoll的最大好处是不会随着FD的数目增长而降低效率，在selec中采用轮询处理，其中的数据结构类似一个数组的数据结构，而epoll是维护一个队列，直接看队列是不是空就可以了。epoll只会对”活跃”的socket进行操作，这是因为在内核实现中epoll是根据每个fd上面的callback函数实现的。那么，只有”活跃”的socket才会主动的去调用 callback函数（把这个句柄加入队列），其他idle状态句柄则不会，在这点上，epoll实现了一个”伪”AIO。但是如果绝大部分的I/O都是“活跃的”，每个I/O端口使用率很高的话，epoll效率不一定比select高（可能是要维护队列复杂）；
+3. 使用mmap加速内核与用户空间的消息传递。无论是select,poll还是epoll都需要内核把FD消息通知给用户空间，如何避免不必要的内存拷贝就很重要，在这点上，epoll是通过内核于用户空间mmap同一块内存实现的。
 
 ### AIO
 
 ![](img\AIO.jpg)
 
+read/write方法都是异步的，完成后会主动调用回调函数。
+
 ### 区别
 
 ![](img\IO区别.jpg)
+
+
 
 ## Netty
 
@@ -2414,7 +2482,7 @@ B+Tree更适合做索引：
 
 - B+Tree是 B Tree 的变种，B Tree 能解决的问题，它都能解决。
 
-  B Tree 解决的两大问题：每个节点存储更多关键字；路数更多
+  B+Tree 解决的两大问题：每个节点存储更多关键字；路数更多
 
 - 扫库、扫表能力更强
 
@@ -2518,6 +2586,14 @@ select name from user where name = ‘张三’;比如这条语句，select的�
 
 索引下推的目的是为了减少回表次数，也就是要减少IO操作。对于`InnoDB`的**聚簇索引**来说，数据和索引是在一起的，不存在回表这一说。
 
+没有使用索引下推：回表两次
+
+![；](img/索引下推.jpg)
+
+使用索引下推：回表一次
+
+![](img/索引下推02.jpg)
+
 问：如何定位并优化慢查询sql？
 
 1）根据慢日志定位慢查询sql
@@ -2549,8 +2625,6 @@ extra：Using fileSort、Using temporary 说明没有使用索引查询
 2）数据变更需要维护索引，因此更多的索引意味这着更多的维护成本。
 
 3）更多的索引会占用更多的空间。
-
-
 
 ### group by
 
@@ -2657,9 +2731,7 @@ MVCC多版本并发控制指的是维持一个数据的多个版本，使得读�
 **MVCC的好处：**
 多版本并发控制（MVCC）是一种用来解决读-写冲突的无锁并发控制，也就是为事务分配单向增长的时间戳，为每个修改保存一个版本，版本与事务时间戳关联，读操作只读该事务开始前的数据库的快照。所以 MVCC 可以为数据库解决以下问题:
 
-在并发读写数据库时，可以做到在读操作时不用阻塞写操作，写操作也不用阻塞读操作，提高了数据库并发读写的性能
-
-同时还可以解决脏读，幻读，不可重复读等事务隔离问题，但不能解决更新丢失问题。它的实现原理主要是依赖记录中的 3个隐式字段，undo日志 ，Read View 来实现的。关于它的实现，要抓住几个关键点，**隐式字段、undo日志、版本链、快照读&当前读、Read View**。
+在并发读写数据库时，可以做到在读操作时不用阻塞写操作，写操作也不用阻塞读操作，提高了数据库并发读写的性能，同时还可以解决脏读，幻读，不可重复读等事务隔离问题，但不能解决更新丢失问题。它的实现原理主要是依赖记录中的 3个隐式字段，undo日志 ，Read View 来实现的。关于它的实现，要抓住几个关键点，**隐式字段、undo日志、版本链、快照读&当前读、Read View**。
 
 读取已提交和可重复读级别利用了`ReadView`和`MVCC`，也就是每个事务只能读取它能看到的版本（ReadView）。
 
@@ -2923,9 +2995,9 @@ I/O多路复用三种实现机制：
 
 **优点：**
 
-第⼀点，epoll 在内核⾥使⽤**红⿊树来跟踪进程所有待检测的⽂件描述字**，把需要监控的 socket 通过epoll_ctl() 函数加⼊内核中的红⿊树⾥，红⿊树是个⾼效的数据结构，增删查⼀般时间复杂度是O(logn) ，通过对这棵⿊红树进⾏操作，这样就不需要像 select/poll 每次操作时都传⼊整个 socket 集合，只需要传⼊⼀个待检测的 socket，**减少了内核和⽤户空间⼤量的数据拷⻉和内存分配**。
+第⼀点，epoll 在内核⾥使⽤**红⿊树来跟踪进程所有待检测的文件描述字**，把需要监控的 socket 通过epoll_ctl() 函数加⼊内核中的红⿊树⾥，红⿊树是个⾼效的数据结构，增删查⼀般时间复杂度是O(logn) ，通过对这棵⿊红树进⾏操作，这样就不需要像 select/poll 每次操作时都传⼊整个 socket 集合，只需要传⼊⼀个待检测的 socket，**减少了内核和⽤户空间⼤量的数据拷⻉和内存分配**。
 
-第⼆点， epoll 使⽤事件驱动的机制，内核⾥**维护了⼀个链表来记录就绪事件**，当某个 socket 有事件发⽣时，通过回调函数，内核会将其加⼊到这个就绪事件列表中，当⽤户调⽤ epoll_wait() 函数时，只会返回有事件发⽣的⽂件描述符的个数，不需要像 select/poll 那样轮询扫描整个 socket 集合，⼤⼤提⾼了检测的效率。
+第二点， epoll 使⽤事件驱动的机制，内核⾥**维护了⼀个链表来记录就绪事件**，当某个 socket 有事件发⽣时，通过回调函数，内核会将其加⼊到这个就绪事件列表中，当⽤户调⽤ epoll_wait() 函数时，只会返回有事件发⽣的⽂件描述符的个数，不需要像 select/poll 那样轮询扫描整个 socket 集合，⼤⼤提⾼了检测的效率。
 
 用户可以注册多个socket，然后不断地调用select读取被激活的socket，即可达到在**同一个线程内同时处理多个IO请求的目的**。
 
@@ -2977,6 +3049,17 @@ set对外提供的功能与list类似，区别在于不可以存储重复的元�
 ![](img\redis SCAN指令.jpg)
 
 cursor ：游标，从0开始，到0结束。每次返回的cursor不一定是递增的，说明返回的key可能是重复(重新hash)的。
+
+Scan底层是遍历hashMap。
+
+- Scan Count 参数限制的是遍历的 bucket 数，而不是限制的返回的元素个数
+  - 由于不同 bucket 中的元素个数不同，其中满足条件的个数也不同，所以每次 Scan 返回元素也不一定相同
+- Count 越大，Scan 总耗时越短，但是单次耗时越大，即阻塞Redis 时间边长
+  - 推荐 Count 大小为 1W左右
+  - 当 Count = Redis Key 总数时，Scan 和 Keys 效果一致
+- Scan 采用 逆二进制迭代法来计算游标，主要为了兼容Rehash的情况
+- Scan 为了兼容缩容后不漏掉数据，会出现重复遍历。
+  - 即客户端需要做去重处理
 
 ### 分布式锁
 
@@ -3810,7 +3893,7 @@ public class APP {
 }
 ```
 
-![](img\img/%E5%B7%A5%E5%8E%82%E6%A8%A1%E5%BC%8F.jpg)
+![](img/%E5%B7%A5%E5%8E%82%E6%A8%A1%E5%BC%8F.jpg)
 
 #### 抽象工厂模式
 
@@ -4591,7 +4674,17 @@ Java SPI 在查找扩展实现类的时候遍历 SPI 的配置文件并且**将�
 
 Dubbo 就自己实现了一个 SPI，配置文件里面存放的是键值对，比如name=path，通过名字去文件里面找到对应的实现类全限定名然后加载实例化即可。
 
+Dubbo 对配置文件目录的约定分为了三类目录：
+
+- META-INF/services/ 目录：该目录下的 SPI 配置文件是为了用来兼容 Java SPI 。
+
+- META-INF/dubbo/ 目录：该目录存放用户自定义的 SPI 配置文件。
+
+- META-INF/dubbo/internal/ 目录：该目录存放 Dubbo 内部使用的 SPI 配置文件。
+
 并且 **Dubbo SPI 除了可以按需加载实现类之外，增加了 IOC 和 AOP 的特性，还有个自适应扩展机制。**
+
+自适应扩展：根据配置来进行 SPI 扩展的加载，但是我不想在启动的时候让扩展被加载，想根据请求时候的参数来动态选择对应的扩展。**Dubbo 通过一个代理机制实现了自适应扩展**。
 
 ![](img/dubboSPI.png)
 
@@ -4663,7 +4756,7 @@ Dubbo 也有自己的负载均衡，即 LoadBalance，前面我们提到服务�
 
 首先在服务引入的时候，将多个远程调用都塞入 Directory 中，然后通过 Cluster 来封装这个目录，封装的同时提供各种容错功能，比如 FailOver、FailFast 等等，最终暴露给消费者的就是一个 invoker。
 
-然后消费者调用的时候会目录里面得到 invoker 列表，当然会经过路由的过滤，得到这些 invokers 之后再由 loadBalance 来进行负载均衡选择一个 invoker，最终发起调用。
+然后消费者调用的时候会从目录里面得到 invoker 列表，当然会经过路由的过滤，得到这些 invokers 之后再由 loadBalance 来进行负载均衡选择一个 invoker，最终发起调用。
 
 这种过程其实是在 Cluster 的内部发起的，所以能在发起调用出错的情况下，用上容错的各种措施。
 
@@ -5182,7 +5275,7 @@ WebSocket协议是一种长链接，只需要通过一次请求来初始化链�
 
 - 消息重复？
 
-  网络原因闪断，ACK返回失败等等故障，确认信息没有传送到消息队列，导致消息队列不知道自己已经消费过该消息了，再次将该消息分发给其他的消费者。
+  网络原因闪断，ACK返回失败等等故障，消费者消费成功的确认信息没有传送到消息队列，导致消息队列不知道自己已经发送成功过该消息了，再次将该消息分发给其他的消费者。或者是生产者由于网络或者其他问题导致没有收到消息队列成功收到消息的确认，重复向消息队列发送消息。
 
   不同的消息队列发送的确认信息形式不同，例如**RabbitMQ**是发送一个ACK确认消息，**RocketMQ**是返回一个CONSUME_SUCCESS成功标志，**Kafka**实际上有个offset的概念。**RocketMQ**没有内置消息去重的解决方案。
 
@@ -5191,6 +5284,8 @@ WebSocket协议是一种长链接，只需要通过一次请求来初始化链�
   **去重策略**：保证每条消息都有唯一编号(**比如唯一流水号)**，且保证消息处理成功与去重表的日志同时出现。
 
   建立一个消息表，拿到这个消息做数据库的insert操作。给这个消息做一个唯一主键（primary key）或者唯一约束，那么就算出现重复消费的情况，就会导致主键冲突，那么就不再处理这条消息。
+
+  或者将消息存到redis，存储形式为map，key为消息唯一id，value为消息内容，消费之前先从redis里面找，看是否存在，存在则说明已经消费过。
 
 - 消息可用性？
 
@@ -5208,15 +5303,11 @@ WebSocket协议是一种长链接，只需要通过一次请求来初始化链�
 
 - 半消息？
 
-  **是指暂不能被Consumer消费的消息**。Producer 已经把消息成功发送到了 Broker 端，但此消息被标记为`暂不能投递`状态，处于该种状态下的消息称为半消息。需要 Producer
-
-  对消息的`二次确认`后，Consumer才能去消费它。
+  **是指暂不能被Consumer消费的消息**。Producer 已经把消息成功发送到了 Broker 端，但此消息被标记为`暂不能投递`状态，处于该种状态下的消息称为半消息。需要 Producer对消息的`二次确认`后，Consumer才能去消费它。
 
 - 消息回查？
 
-  由于网络闪段，生产者应用重启等原因。导致 **Producer** 端一直没有对 **Half Message(半消息)** 进行 **二次确认**。这是**Brock**服务器会定时扫描`长期处于半消息的消息`，会
-
-  主动询问 **Producer**端 该消息的最终状态(**Commit或者Rollback**),该消息即为 **消息回查**。
+  由于网络闪段，生产者应用重启等原因。导致 **Producer** 端一直没有对 **Half Message(半消息)** 进行 **二次确认**。这是**Brock**服务器会定时扫描`长期处于半消息的消息`，会主动询问 **Producer**端 该消息的最终状态(**Commit或者Rollback**),该消息即为 **消息回查**。
 
   ![](img/rocketmq%E6%B6%88%E6%81%AF%E5%9B%9E%E6%9F%A5.jpg)
 
@@ -6179,13 +6270,90 @@ Unix 有五种 I/O 模型：
 
 ### Spring
 
+#### 启动流程
+
+![](img/spring启动流程.png)
+
+- 初始化流程：spring容器的初始化时，通过this()调用了无参构造函数，主要做了以下三个事情：
+
+  （1）实例化BeanFactory【DefaultListableBeanFactory】工厂，用于生成Bean对象。
+  （2）实例化BeanDefinitionReader注解配置读取器，用于对特定注解（如@Service、@Repository）的类进行读		 取转化成  BeanDefinition 对象，（BeanDefinition 是 Spring 中极其重要的一个概念，它存储了 bean 对象的		 所有特征信息，如是否单例，是否懒加载，factoryBeanName 等）。
+  （3）实例化ClassPathBeanDefinitionScanner路径扫描器，用于对指定的包目录进行扫描查找 bean 对象。
+
+- 注册SpringConfig配置类到容器中：
+
+  **doRegisterBean**这个步骤主要是用来解析用户传入的 Spring 配置类，解析成一个 BeanDefinition 然后注册到容器中。
+
+- refresh()容器刷新流程：
+
+- refresh()主要用于容器的刷新，Spring 中的每一个容器都会调用 refresh() 方法进行刷新，无论是 Spring 的父子容器，还是 Spring Cloud Feign 中的 feign 隔离容器，每一个容器都会调用这个方法完成初始化。refresh()可划分为12个步骤。
+
+  ```
+  1、prepareRefresh()刷新前的预处理：
+  （1）initPropertySources()：初始化一些属性设置，子类自定义个性化的属性设置方法；
+  （2）getEnvironment().validateRequiredProperties()：检验属性的合法性
+  （3）earlyApplicationEvents = new LinkedHashSet<ApplicationEvent>()：保存容器中的一些早期的事件；
+  2、obtainFreshBeanFactory()：获取在容器初始化时创建的BeanFactory：
+  （1）refreshBeanFactory()：刷新BeanFactory，设置序列化ID；
+  （2）getBeanFactory()：返回初始化中的GenericApplicationContext创建的BeanFactory对象，即	  		【DefaultListableBeanFactory】类型
+  3、prepareBeanFactory(beanFactory)：BeanFactory的预处理工作，向容器中添加一些组件：
+  （1）设置BeanFactory的类加载器、设置表达式解析器等等
+  （2）添加BeanPostProcessor【ApplicationContextAwareProcessor】
+  （3）设置忽略自动装配的接口：EnvironmentAware、EmbeddedValueResolverAware、ResourceLoaderAware、ApplicationEventPublisherAware、MessageSourceAware、ApplicationContextAware；
+  （4）注册可以解析的自动装配类，即可以在任意组件中通过注解自动注入：BeanFactory、ResourceLoader、ApplicationEventPublisher、ApplicationContext
+  （5）添加BeanPostProcessor【ApplicationListenerDetector】
+  （6）添加编译时的AspectJ；
+  （7）给BeanFactory中注册的3个组件：environment【ConfigurableEnvironment】、systemProperties【Map<String, Object>】、systemEnvironment【Map<String, Object>】
+  4、postProcessBeanFactory(beanFactory)：子类重写该方法，可以实现在BeanFactory创建并预处理完成以后做进一步的设置
+  5、invokeBeanFactoryPostProcessors(beanFactory)：在BeanFactory标准初始化之后执行BeanFactoryPostProcessor的方法，即BeanFactory的后置处理器：
+  （1）先执行BeanDefinitionRegistryPostProcessor：postProcessor.postProcessBeanDefinitionRegistry(registry)
+  ① 获取所有的实现了BeanDefinitionRegistryPostProcessor接口类型的集合
+  ② 先执行实现了PriorityOrdered优先级接口的BeanDefinitionRegistryPostProcessor
+  ③ 再执行实现了Ordered顺序接口的BeanDefinitionRegistryPostProcessor
+  ④ 最后执行没有实现任何优先级或者是顺序接口的BeanDefinitionRegistryPostProcessors        
+  （2）再执行BeanFactoryPostProcessor的方法：postProcessor.postProcessBeanFactory(beanFactory)
+  ① 获取所有的实现了BeanFactoryPostProcessor接口类型的集合
+  ② 先执行实现了PriorityOrdered优先级接口的BeanFactoryPostProcessor
+  ③ 再执行实现了Ordered顺序接口的BeanFactoryPostProcessor
+  ④ 最后执行没有实现任何优先级或者是顺序接口的BeanFactoryPostProcessor
+  6、registerBeanPostProcessors(beanFactory)：向容器中注册Bean的后置处理器BeanPostProcessor，它的主要作用是干预Spring初始化bean的流程，从而完成代理、自动注入、循环依赖等功能
+  （1）获取所有实现了BeanPostProcessor接口类型的集合：
+  （2）先注册实现了PriorityOrdered优先级接口的BeanPostProcessor；
+  （3）再注册实现了Ordered优先级接口的BeanPostProcessor；
+  （4）最后注册没有实现任何优先级接口的BeanPostProcessor；
+  （5）最r终注册MergedBeanDefinitionPostProcessor类型的BeanPostProcessor：beanFactory.addBeanPostProcessor(postProcessor);
+  （6）给容器注册一个ApplicationListenerDetector：用于在Bean创建完成后检查是否是ApplicationListener，如果是，就把Bean放到容器中保存起来：applicationContext.addApplicationListener((ApplicationListener<?>) bean);
+  此时容器中默认有6个默认的BeanProcessor(无任何代理模式下)：【ApplicationContextAwareProcessor】、【ConfigurationClassPostProcessorsAwareBeanPostProcessor】、【PostProcessorRegistrationDelegate】、【CommonAnnotationBeanPostProcessor】、【AutowiredAnnotationBeanPostProcessor】、【ApplicationListenerDetector】
+  7、initMessageSource()：初始化MessageSource组件，主要用于做国际化功能，消息绑定与消息解析：
+  （1）看BeanFactory容器中是否有id为messageSource 并且类型是MessageSource的组件：如果有，直接赋值给messageSource；如果没有，则创建一个DelegatingMessageSource；
+  （2）把创建好的MessageSource注册在容器中，以后获取国际化配置文件的值的时候，可以自动注入MessageSource；
+  8、initApplicationEventMulticaster()：初始化事件派发器，在注册监听器时会用到：
+  （1）看BeanFactory容器中是否存在自定义的ApplicationEventMulticaster：如果有，直接从容器中获取；如果没有，则创建一个SimpleApplicationEventMulticaster
+  （2）将创建的ApplicationEventMulticaster添加到BeanFactory中，以后其他组件就可以直接自动注入
+  9、onRefresh()：留给子容器、子类重写这个方法，在容器刷新的时候可以自定义逻辑
+  10、registerListeners()：注册监听器：将容器中所有的ApplicationListener注册到事件派发器中，并派发之前步骤产生的事件：
+  （1）从容器中拿到所有的ApplicationListener
+  （2）将每个监听器添加到事件派发器中：getApplicationEventMulticaster().addApplicationListenerBean(listenerBeanName);
+  （3）派发之前步骤产生的事件applicationEvents：getApplicationEventMulticaster().multicastEvent(earlyEvent);
+  11、finishBeanFactoryInitialization(beanFactory)：初始化所有剩下的单实例bean，核心方法是preInstantiateSingletons()，会调用getBean()方法创建对象；
+  （1）获取容器中的所有beanDefinitionName，依次进行初始化和创建对象
+  （2）获取Bean的定义信息RootBeanDefinition，它表示自己的BeanDefinition和可能存在父类的BeanDefinition合并后的对象
+  （3）如果Bean满足这三个条件：非抽象的，单实例，非懒加载，则执行单例Bean创建流程：    
+  （4）所有Bean都利用getBean()创建完成以后，检查所有的Bean是否为SmartInitializingSingleton接口的，如果是；就执行afterSingletonsInstantiated()；
+  12、finishRefresh()：发布BeanFactory容器刷新完成事件：
+  （1）initLifecycleProcessor()：初始化和生命周期有关的后置处理器：默认从容器中找是否有lifecycleProcessor的组件【LifecycleProcessor】，如果没有，则创建一个DefaultLifecycleProcessor()加入到容器；
+  （2）getLifecycleProcessor().onRefresh()：拿到前面定义的生命周期处理器（LifecycleProcessor）回调onRefresh()方法
+  （3）publishEvent(new ContextRefreshedEvent(this))：发布容器刷新完成事件；
+  （4）liveBeansView.registerApplicationContext(this);
+  ```
+
 #### SpringIOC
 
 - SpringIOC理解、原理和实现？
 
   控制反转：（理论思想），在Spring出现之前对象是由使用者进行控制的，使用了Spring之后，可以把整个对象交给Spring去帮我们管理，包括对象的创建、使用、销毁等。DI：依赖注入，我们可以通过依赖注入的方式使用Spring帮我们创建的对象，比如：@Autowired。
 
-  IoC（Inverse of Control:控制反转）是一种**设计思想** 或者说是某种模式。IoC 容器是 Spring 用来实现 IoC 的载体， IoC 容器实际上就是个 Map（key，value）,Map 中存放的是各种对象。IoC 最常见以及最合理的实现方式叫做依赖注入（Dependency Injection，简称 DI）。
+  IoC（Inverse of Control:控制反转）是一种**设计思想**或者说是某种模式。IoC 容器是 Spring 用来实现 IoC 的载体， IoC 容器实际上就是个 Map（key，value)，Map 中存放的是各种对象。IoC 最常见以及最合理的实现方式叫做依赖注入（Dependency Injection，简称 DI）。
 
   容器：存储对象，Map结构，在Spring中一般存在三级缓存，singletonObjects存放完整的bean对象，整个bean的生命周期，从创建到使用到销毁的过程全是由容器来管理。（bean的生命周期）
 
@@ -6238,9 +6406,48 @@ Unix 有五种 I/O 模型：
   7. 获取到完整的对象，可以通过getBean的方式进行对象的获取。
   8. 销毁流程：判断是否实现了DispoableBean接口；调用destoryMethod方法。
 
+- 核心类
+
+  - BeanFactory：生产与管理Bean的工厂，BeanFactory是Spring中的一个顶级接口，它定义了获取Bean的方式。DefaultListableBeanFactory：继承与实现以上所有类和接口，是为Spring中最底层的BeanFactory, 自身实现了ListableBeanFactory接口。
+
+  - SingletonBeanRegistry：定义的是操作单例Bean的方式。DefaultSingletonBeanRegistry： 定义了Bean的缓存池，类似于我们的BeanMap，实现了有关单例的操作，比如`getSingleton`(面试常问的三级缓存就在这里)。
+
+  - BeanDefinition：是个接口，定义了许多和类信息相关的操作方法，方便在生产Bean的时候直接使用，比如`getBeanClassName`。
+
+  - BeanDefinitionRegistry：定义了与BeanDefiniton相关的操作，如`registerBeanDefinition`，`getBeanDefinition`，在BeanFactory中，实现类就是DefaultListableBeanFactory。
+
+  - BeanDefinitionRegistryPostProcessor：
+
+  - 该接口只定义了一个功能：处理BeanDefinitonRegistry，也就是解析配置类中的Import、Component、ComponentScan等注解进行相应的处理，处理完毕后将这些类注册成对应的BeanDefinition
+
+    在Spring内部中，只有一个实现：ConfigurationClassPostProcessor。
+
+  - BeanFactoryPostProcessor：BeanFactory的后置处理器，它定义了在解析完配置类后可以调用的处理逻辑，类似于一个插槽，如果我们想在配置类解析完后做点什么，就可以实现该接口。
+
+    在Spring内部中，同样只有ConfigurationClassPostProcessor实现了它：用于专门处理加了Configuration注解的类。
+
+  - BeanPostProcessor：Bean的后置处理器，该后置处理器贯穿了Bean的生命周期整个过程，在Bean的创建过程中，一共被调用了9次。
+
+  - ApplicationContext：ApplicationContext作为Spring的核心，以门面模式隔离了BeanFactory，以模板方法模式定义了Spring启动流程的骨架，又以策略模式调用了各式各样的Processor。
+
+    ![](img/applicationContext.jpg)
+
+通过注解方式启动容器创建Spring Bean的过程：
+
+![](img/spring-refresh.png)
+
+BeanFactory和ApplicationContext的区别：
+
+- BeanFactroy 采用的是延迟加载形式来注入 Bean 的，即只有在使用到某个 Bean 时(调用 getBean())，才对该 Bean 进行加载实例化。这样，我们就不能发现一些存在的 spring 的配置 问题。而 ApplicationContext 则相反，它是在容器启动时，一次性创建了所有的 Bean。这 样，在容器启动时，我们就可以发现 Spring 中存在的配置错误。
+- ApplicationContext 继承了 BeanFactory，BeanFactory 是 Spring 中比较原始的 Factory，它不支持 AOP、Web 等 Spring 插件。而 ApplicationContext 不仅包含了 BeanFactory 的所有功能，还支持 Spring 的各种插件，还以一种面向框架的方式工作以及对上下文进行分层和实 现继承。 BeanFactory 是 Spring 框架的基础设施，面向 Spring 本身；而 ApplicationContext 面向使用 Spring 的开发者，相比 BeanFactory 提供了更多面向实际应用的功能，几乎所有场合都可以直接使 用 ApplicationContext，而不是底层的 BeanFactory。
+
 ##### 三级缓存
 
 ![](img/Spring%E4%B8%89%E7%BA%A7%E7%BC%93%E5%AD%98.png)
+
+如果A、B两个对象都是构造器互相注入依赖，那么程序会直接抛异常。如果A是构造器、B是Set注入，也会抛异常。
+
+原因：spring 在创建 bean 之前，会将当前正在创建的 bean 名称放在一个列表中，这个列表我们就叫做 singletonsCurrentlyInCreation，用来记录正在创建中的 bean 名称列表，创建完毕之后，会将其从 singletonsCurrentlyInCreation 列表中移除，并且会将创建好的 bean 放到另外一个单例列表中，这个列表叫做 singletonObjects。如果A是构造器注入，那么A就会一直存在于singletonsCurrentlyInCreation，B中的A填充的时候，就会在singletonsCurrentlyInCreation发现A，此时就会抛异常。
 
 - Spring如何解决循环依赖？
 
@@ -6261,9 +6468,13 @@ Unix 有五种 I/O 模型：
 
   如果在程序调用过程中，拥有了某个对象的引用，能否在后期给它完成赋值操作，也就是优先把非完整状态的对象赋值，等待后续操作进一步完成赋值，相当于提前暴露了某个不完整对象的引用。所以解决循环引用的关键就是把初始化和实例化分开操作。
 
-  当所有对象完成了实例化和初始化操作之后，要把完整的对象放在容器中，此时容器中的对象有几个状态：完成实例化未完成初始化、完整状态，因为都在容器中，所以要使用不同的map结构来进行存储，此时就有了一级缓存和二级缓存，查找顺序是一级、二级、三级。一级缓存存放完整对象，而正对象存放非完整对象。
+  当所有对象完成了实例化和初始化操作之后，要把完整的对象放在容器中，此时容器中的对象有几个状态：完成实例化未完成初始化、完整状态，因为都在容器中，所以要使用不同的map结构来进行存储，此时就有了一级缓存和二级缓存，查找顺序是一级、二级、三级。一级缓存存放完整对象，二级缓存存放非完整对象。
 
   三级缓存：三级缓存的value类型是ObjectFactory，存入的是<beanName, ObjectFactory>结构，是一个函数式接口，存在的意义就是保证在整个容器的运行过程中同名的bean对象只有一个。
+
+  **当某个 bean 进入到 2 级缓存的时候，说明这个 bean 的早期对象被其他 bean 注入了，也就是说，这个 bean 还是半成品，还未完全创建好的时候，已经被别人拿去使用了，所以必须要有 3 级缓存，2 级缓存中存放的是早期的被别人使用的对象，如果没有 2 级缓存，是无法判断这个对象在创建的过程中，是否被别人拿去使用了，比如后来的Bean被Aop代理了，那么跟一开始注入其他Bean的就不是同一个对象。**
+
+  ![](img/spring三级缓存循环依赖.png)
 
 - Bean Factory和Factory Bean的区别
 
@@ -6308,11 +6519,13 @@ Unix 有五种 I/O 模型：
 
   AOP面向切面编程，这里的“切”指的是横切逻辑，原有业务逻辑代码不动，只能操作横切逻辑代码，所以面向横切逻辑；“面”指的是横切逻辑代码往往要影响的是很多个方法，每个方法如同一个点，多个点构成一个面。这里有一个面的概念。
 
+  切点：具体对哪个方法去做增强；切面：若干个切点组成了切面；通知：具体对切点方法做什么增强（5种）。
+
   AOP 主要用来解决：在不改变原有业务逻辑的情况下，增强横切逻辑代码，根本上解耦合，避免横切逻辑代码重复。
 
   使用场景：事务处理、日志管理、权限控制等。
 
-  aop是ioc的一个扩展功能，现有的ioc，再有的aop，aop知识在ioc的整个流程中新增的一个扩展点：BeanPostProcessor。BeanPostProcessor有两个方法：postProcessBeforeInitialization()、postProcessAfterInitialization()，这两个方法会在bean初始化前后执行，DefaultAdvisorAutoProxyCreator继承了BeanPostProcessor，从而实现了AOP代理。
+  aop是ioc的一个扩展功能，先有的ioc，再有的aop，aop只是在ioc的整个流程中新增的一个扩展点：BeanPostProcessor。BeanPostProcessor有两个方法：postProcessBeforeInitialization()、postProcessAfterInitialization()，这两个方法会在bean初始化前后执行，DefaultAdvisorAutoProxyCreator继承了BeanPostProcessor，从而实现了AOP代理。
 
   如果被代理的目标类实现了一个或多个自定义的接口，那么就会使用 JDK 动态代理，如果没有实现任何接口，会使用 CGLIB 实现代理，如果设置了 proxy-target-class="true"，那么都会使用 CGLIB。
 
@@ -6373,8 +6586,6 @@ Unix 有五种 I/O 模型：
   Cglib动态代理：cglib是针对类实现代理，主要是对指定的类生成一个子类，覆盖其中的方法。
 
   ![](img/Cglib%E5%8A%A8%E6%80%81%E4%BB%A3%E7%90%86.png)
-
-
 
 #### SpringBoot注解
 
