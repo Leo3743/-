@@ -5416,6 +5416,23 @@ ElasticSearch使用的是倒排索引，倒排索引就是根据**单个词**来
 
 2.discovery.zen.minimum_master_nodes(默认是1)：这个参数控制的是，一个节点需要看到的具有master节点资格的最小数量，然后才能在集群中做操作。官方的推荐值是(N/2)+1，其中N是具有master资格的节点的数量。作用是只有足够的master候选节点时，才可以选举出一个master。该参数必须设置为集群中master候选节点的quorum数量。**quorum的算法=master候选节点数量/2+1**。**一般es集群的节点至少要有3个，quorum设置为2。**
 
+#### EFLK
+
+es+filebeat+logstash+kibana
+
+- filebeat 将日志收集后交由 logstash 处理
+- logstash 进行过滤、格式化等操作，满足过滤条件的数据将发送给 ES
+- ES 对数据进行分片存储，并提供索引功能
+- Kibana 对数据进行图形化的 web 展示，并提供索引接口
+
+缺点：filebeat只有一个输出源。
+
+#### EFKLK
+
+es+filebeat+kafka+logstash/redis+kibana
+
+将filebeat收集到的日志发送给kafka消息队列，然后就可以解决filebeat只有一个输出源的问题，只要订阅了相关的队列，都可以收到filebeat收集到的日志。
+
 ### Kafaka
 
 数据的高可靠就是**系统要提供可靠的数据支撑**，不能发生丢失、重复等错误现象。Kafaka要做的就是保证系统的高可靠，即消息队列。
