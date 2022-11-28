@@ -1,4 +1,4 @@
-Basic Knowledge
+# Basic Knowledge
 
 ## 操作系统
 
@@ -5684,6 +5684,26 @@ chunk的产生，会有以下两个用途：
 - Splitting：当一个chunk的大小超过配置中的chunk size时，MongoDB的后台进程会把这个chunk切分成更小的chunk，从而避免chunk过大的情况
 - Balancing：在MongoDB中，balancer是一个后台进程，负责chunk的迁移，从而均衡各个shard server的负载，系统初始1个chunk，chunk size默认值64M,生产库上选择适合业务的chunk size是最好的。mongoDB会自动拆分和迁移chunks。
 
+## 单点登录
+
+单点登录全称Single Sign On（简称SSO），是指在多系统应用群中登录一个系统，便可在其他所有系统中得到授权而无需再次登录，包括单点登录与单点注销两部分。
+
+### 登录
+
+![](img/%E5%8D%95%E7%82%B9%E7%99%BB%E5%BD%95.png)
+
+用户登录成功之后，会与sso认证中心及各个子系统建立会话，用户与sso认证中心建立的会话称为全局会话，用户与各个子系统建立的会话称为局部会话，局部会话建立之后，用户访问子系统受保护资源将不再通过sso认证中心，全局会话与局部会话有如下约束关系
+
+1. 局部会话存在，全局会话一定存在
+2. 全局会话存在，局部会话不一定存在
+3. 全局会话销毁，局部会话必须销毁
+
+### 注销
+
+单点登录自然也要单点注销，在一个子系统中注销，所有子系统的会话都将被销毁。
+
+![](img/%E5%8D%95%E7%82%B9%E6%B3%A8%E9%94%80.png)
+
 ## 秒杀
 
 ![](img/%E7%A7%92%E6%9D%80.jpg)
@@ -6756,6 +6776,45 @@ HandlerAdapter执行完对Controller的请求，会调用HandlerMethodReturnValu
 1. Spring Cloud Netflix
 2. Spring Cloud Alibaba
 3. SpringBoot + Dubbo + ZooKeeper
+
+#### 常见问题
+
+- ```
+  @Configuration
+  public class MyBeanConfig {
+  
+      @Bean
+      public Country country(){
+          return new Country();
+      }
+  
+      @Bean
+      public UserInfo userInfo(){
+          return new UserInfo(country());
+      }
+  
+  }
+  Country被创建一次。
+  
+  @Component
+  public class MyBeanConfig {
+  
+      @Bean
+      public Country country(){
+          return new Country();
+      }
+  
+      @Bean
+      public UserInfo userInfo(){
+          return new UserInfo(country());
+      }
+  
+  }
+  Country被创建两次。
+  一句话概括就是 @Configuration 中所有带 @Bean 注解的方法都会被动态代理，因此调用该方法返回的都是同一个实例。
+  ```
+
+  
 
 ### 分布式事务
 
