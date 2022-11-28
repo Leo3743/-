@@ -1525,6 +1525,50 @@ Socket = ip + port + 协议；WebSocket只是一个应用层通信协议。
 
 ## Java基础
 
+### 字符串常量池
+
+字符串常量池(String pool, String intern pool, String保留池) 是Java堆内存中一个特殊的存储区域, 当创建一个String对象时,假如此字符串值已经存在于常量池中,则不会创建一个新的对象,而是引用已经存在的对象。string pool中存的是引用值而不是具体的实例对象，具体的实例对象是在堆中开辟的一块空间存放的。
+
+- “abc” 双引号String 对象会自动放入常量池
+- 调用String的intern 方法也会将对象放入到常量池中
+
+**String为什么是不可变的？**
+
+- **字符串常量池的需要**：节约空间
+- **允许String对象缓存HashCode**：字符串不变性保证了hash码的唯一性
+- **安全性**：多线程下是安全的
+
+### 值传递和引用传递
+
+值传递是指基本类型的传递，其实是复制了一份传递出去，不会改变原来的基本类型的值。
+
+引用传递是指引用类型的传递，传递的是变量的引用，外部对引用的修改也会影响原来的变量。但是如果传递出去的引用指向了新的引用，那么不会影响原来的变量的值。比如：像string = ""，相当于new String();
+
+```
+
+public class Hello {
+    public static void main(String[] args) {
+        Hello hello = new Hello();
+        User user2 = new User();
+        user2.setName("li");
+        hello.pass2(user2);
+        System.out.println("main:"+user2.getName());
+    }
+ 
+    public void pass2(User user) {
+        user = new User();
+        user.setName("java new");
+        System.out.println("The name is :" + user.getName());
+    }
+ 
+}
+输出：
+The name is java new
+main:li
+```
+
+
+
 ### 反射
 
 ### 枚举
@@ -3638,6 +3682,32 @@ new Integer(2) == 2
 
   ## 算法
 
+### 排序
+
+| 排序方法 |     平均情况     | 最好情况 | 最坏情况 |     空间     | 稳定性 |
+| :------: | :--------------: | :------: | :------: | :----------: | :----: |
+| 冒泡排序 |      O(n2)       |   O(n)   |  O(n2)   |     O(1)     |  稳定  |
+| 选择排序 |      O(n2)       |  O(n2)   |  O(n2)   |     O(1)     | 不稳定 |
+| 插入排序 |      O(n2)       |   O(n)   |  O(n2)   |     O(1)     |  稳定  |
+| 希尔排序 | O(nlogn) ~ O(n2) | O(n1.3)  |  O(n2)   |     O(1)     | 不稳定 |
+| 归并排序 |     O(nlogn)     | O(nlogn) | O(nlogn) |     O(n)     |  稳定  |
+| 快速排序 |     O(nlogn)     | O(nlogn) |  O(n2)   | O(logn)~O(n) | 不稳定 |
+|  堆排序  |     O(nlogn)     | O(nlogn) | O(nlogn) |     O(1)     | 不稳定 |
+
+#### 数据规模
+
+O(n2)处理10^4级别的数据；O(n)处理10^8级别的数据；O(nlogn)处理10^7级别的数据。
+
+### 复杂度
+
+#### 均摊复杂度
+
+当一个方法的前N次操作复杂度都是O(1)，第N+1次操作的复杂度为O(n)，那么这个方法的时间复杂度还为O(1)，因为第N+1次操作的复杂度均摊到前N次操作，那么复杂度就还是为O(1)，这就叫均摊复杂度。
+
+#### 复杂度震荡
+
+比如，动态数据扩容操作，add第N+1个元素的时候扩容，此时复杂度为O(n)，pop第N+1个元素的时候缩容，此时复杂度为O(n)，如果一直在这两个操作之间来回循环，那么整体复杂度就会变成O(n)，这就是复杂度震荡。
+
 ### 递归
 
 三要素：1、要做什么？2、结束条件 3、函数等价关系
@@ -3652,19 +3722,47 @@ eg：链表反转、组合元素
 
 要素：1、循环体逻辑 2、循环结束条件 3、处理特殊情况
 
-### 二分查找
+### 数组
 
-### 算法复杂度
+#### 二分查找
 
-复杂度排序：1 < logn < n < nlogn < n^2 < n^3 < 2^n < n!     代表最坏情况用时
+#### 滑动窗口
 
-O(N^2)：冒泡排序、插入排序、选择排序：双层for循环；
+```
+模板：
+/* 滑动窗口算法框架 */
+void slidingWindow(string s, string t) {
+    unordered_map<char, int> need, window;
+    for (char c : t) need[c]++;
+    
+    int left = 0, right = 0;
+    int valid = 0; 
+    while (right < s.size()) {
+        // c 是将移入窗口的字符
+        char c = s[right];
+        // 右移窗口
+        right++;
+        // 进行窗口内数据的一系列更新
+        ...
 
-O(NlogN)：归并排序、快速排序（一分为二递归）：先扫描N个元素，然后一分为二去递归；
+        /*** debug 输出的位置 ***/
+        printf("window: [%d, %d)\n", left, right);
+        /********************/
+        
+        // 判断左侧窗口是否要收缩
+        while (window needs shrink) {
+            // d 是将移出窗口的字符
+            char d = s[left];
+            // 左移窗口
+            left++;
+            // 进行窗口内数据的一系列更新
+            ...
+        }
+    }
+}
+```
 
-O(logN)：二分查找（本来就是有序数组）：一分为二去查找；
 
-O(N)：桶排序（排序一百万个0-99的数据）
 
 ### 动态规划
 
@@ -3744,8 +3842,6 @@ public class LRUTest extends LinkedHashMap<String, String>
     }
 }
 ```
-
-
 
 ### 例题
 
@@ -6049,7 +6145,10 @@ chunk的产生，会有以下两个用途：
   - **解析（Resolution）**
   - **初始化（Initialization）**
   - 使用（Using）
-  - 卸载（Unloading）
+  - 卸载（Unloading）：满足以下条件类会卸载：
+    - 该类所有的实例都已经被回收，也就是java堆中不存在该类的任何实例。
+    - 加载该类的ClassLoader已经被回收。
+    - 该类对应的java.lang.Class对象没有任何地方被引用，无法在任何地方通过反射访问该类的方法。
 
 - 类加载过程：
 
@@ -7187,7 +7286,40 @@ Seata 提供了 AT、TCC、SAGA 和 XA 四种事务模式，可以快速有效�
 ## Java基础
 
 - == 对于基本类型来说是值比较，对于引用类型来说是比较的是引用；而 equals 默认情况下是引用比较，只是很多类重新了 equals 方法，比如 String、Integer 等把它变成了值比较，所以一般情况下 equals 比较的是值是否相等。
-- 
+
+- 为什么重写 equals 还要重写 hashcode？
+
+  当我们在HashSet, HashTable, HashMap等等这些本质是散列表的数据结构中，用到这个类时，就必须同时重写这两个方法，因为两个对象是否相等，需要同时满足这两个方法。如果只重写equals，不重写hashcode，那么会出现两个对象equals相等，但是hashcode不相等得情况，这种是无法忍受的，因为在HashSet中，这种情况会导致出现重复元素。如果两个对象得hashcode相等，equals不相等，这是可以忍受的，因为如果hash冲突，还会通过判断equals是否相等来最终确认两个对象是否相等。
+
+  hashCode()的默认行为是对堆上的对象产生独特值，如果没有重写hashCode()，那么某个类的两个对象的hashCode无论如何都是不可能相等的，即使这两个对象的内容完全相同。
+
+- iterator迭代出来的元素都是原来集合元素的拷贝。
+
+  Java集合中保存的元素实质是对象的引用，而非对象本身。
+
+  迭代出的对象也是引用的拷贝，结果还是引用。那么如果集合中保存的元素是可变类型的，那么可以通过迭代出的元素修改原集合中的对象。
+
+  在对集合进行迭代过程中，不允许出现迭代器以外的对元素的操作，因为这样会产生安全隐患，java会抛出异常并发修改异常（ConcurrentModificationException），普通迭代器只支持在迭代过程中的删除动作。
+
+  ```
+  public static void main(String[] args) {
+  		Collection coll = new ArrayList();
+  		coll.add("aaa");
+  		coll.add("bbb");
+  		coll.add("ccc");
+  		coll.add("ddd");
+  		System.out.println(coll);
+  		Iterator it = coll.iterator();
+  		while (it.hasNext()) {
+  			it.next();
+  			it.remove();
+  			coll.add("abc"); // 出现了迭代器以外的对元素的操作
+  		}
+  		System.out.println(coll);
+  	}
+  ```
+
+  
 
 
 
