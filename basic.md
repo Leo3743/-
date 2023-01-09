@@ -1031,6 +1031,31 @@ Fork/Join框架：把大任务分割成若干小任务并行执行，最终汇�
 
 ![](img/%E7%BA%BF%E7%A8%8B%E6%B1%A0%E6%89%A7%E8%A1%8C%E4%BB%BB%E5%8A%A1%E6%B5%81%E7%A8%8B.png)
 
+##### execute执行流程
+
+1. 当`workerCount < corePoolSize`，创建线程执行任务。
+2. 当`workerCount >= corePoolSize`&&阻塞队列`workQueue`未满，把新的任务放入阻塞队列。
+3. 当`workQueue`已满，并且`workerCount >= corePoolSize`，并且`workerCount < maximumPoolSize`，创建线程执行任务。
+4. 当workQueue已满，`workerCount >= maximumPoolSize`，采取拒绝策略,默认拒绝策略是直接抛异常。
+
+![](img/execute%E6%89%A7%E8%A1%8C%E6%B5%81%E7%A8%8B.jpg)
+
+##### addWorker执行流程
+
+主要工作是在线程池中创建一个新的线程并执行。
+
+![](img/addWorker.png)
+
+**Worker为什么不使用ReentrantLock来实现呢？**
+
+tryAcquire方法它是不允许重入的，而ReentrantLock是允许重入的。对于线程来说，如果线程正在执行是不允许其它锁重入进来的。
+
+线程只需要两个状态，一个是独占锁，表明正在执行任务；一个是不加锁，表明是空闲状态。
+
+**为什么需要持有mainLock？**
+
+因为workers是HashSet类型的，不能保证线程安全。
+
 #### 寻址和存储
 
 32位操作系统：2的32次方 4g寻址空间
@@ -1828,6 +1853,66 @@ Tomact是web容器，可能需要部署多个应用程序。不同的应用程�
 
 ### Java的内存模型
 
+#### 堆外内存
+
+##### 定义
+
+对外内存又成为直接内存，内存对象分配在Java虚拟机的堆以外的内存，这些内存直接受操作系统管理（而不是虚拟机），这样做的结果就是能够在一定程度上减少垃圾回收对应用程序造成的影响。使用未公开的Unsafe和NIO包下ByteBuffer来创建堆外内存。
+
+**使用对外内存的原因？**
+
+- 减少了垃圾回收
+
+- 提升复制速度(io效率)
+
+  **直接使用堆外内存可以减少一次内存拷贝：** 当进行网络 `I/O` 操作、文件读写时，堆内内存都需要转换为堆外内存，然后再与底层设备进行交互。因为：1、**操作系统并不感知 `JVM` 的堆内存**；2、**同一个对象的内存地址随着 `JVM GC` 的执行可能会随时发生变化**。
+
+##### 创建方式
+
+ByteBuffer：字节缓冲区，它有两种实现：
+
+- HeapByteBuffer：使用jvm堆内存的字节缓冲区；（对应 ByteBuffer源码中的 allocate()方法）
+
+- DirectByteBuffer：使用堆外内存，不受jvm堆大小限制；（对应 ByteBuffer源码中的allocateDirect()方法）
+
+  DirectByteBuffer：ByteBuffer对于使用堆外内存的实现，堆外内存直接使用unsafe方法请求堆外内存空间，读写数据；
+
+堆外内存默认大小为64M；如果指定了jvm参数（-XX:MaxDirectMemorySize=512m），就使用指定的大小值。
+
+##### 内存分配
+
+**`Java` 中堆外内存的分配方式有两种：**
+
+1. `NIO`类中的`ByteBuffer#allocateDirect`
+2. `Unsafe#allocateMemory`
+
+![](img/%E5%A0%86%E5%A4%96%E5%86%85%E5%AD%98%E5%88%86%E9%85%8D.png)
+
+**`DirectByteBuffer` 对象：** 存放在堆内存里，仅仅包含堆外内存的地址、大小等属性。同时还会创建对应的 `Cleaner` 对象，通过 `ByteBuffer` 分配的堆外内存不需要手动回收，它可以被 `JVM` 自动回收。
+
+> 当堆内的 `DirectByteBuffer` 对象被 `GC` 回收时，**`Cleaner` 就会用于回收对应的堆外内存**。
+
+##### 内存回收
+
+**堆外内存回收，有两种方式：**
+
+1. **`Full GC` 时以及调用 `System.gc()`：** 通过 `JVM` 参数 `-XX:MaxDirectMemorySize` 指定堆外内存的上限大小，当堆外内存的大小超过该阈值时，就会触发一次 `Full GC` 进行清理回收，如果在 `Full GC` 之后还是无法满足堆外内存的分配，那么程序将会抛出 `OOM` 异常。
+2. **使用`unsafe.freeMemory(address);` 来回收：** `DirectByteBuffer` 在初始化时会创建一个 **`Cleaner` 对象**，`Cleaner` 内同时会创建 `Deallocator`，调用 `Deallocator#run()` 来回收。
+
+一般情况下，当堆内的 `DirectByteBuffer` 对象被 `GC` 回收时，`Cleaner` 就会用于回收对应的堆外内存，但是如果`DirectByteBuffer`对象长时间没有被回收（进入老年代），那么堆外内存就会出现溢出的可能，此时需要手动使用上面两种方式实现堆外内存的回收。
+
+**Cleaner对象**
+
+`DirectByteBuffer` 在初始化时会创建一个 `Cleaner` 对象，`Cleaner`是PhantomReference的子类，它会负责堆外内存的回收工作。
+
+![](img/%E5%A0%86%E5%A4%96%E5%86%85%E5%AD%98%E8%99%9A%E5%BC%95%E7%94%A8.png)
+
+当 `DirectByteBuffer` 被回收的时候，会调用 `Cleaner` 的 `clean()` 方法来释放堆外内存。
+
+
+
+
+
 ### Java垃圾回收
 
 **什么是垃圾：**没有被其他对象引用。
@@ -2068,6 +2153,8 @@ G1不仅满足低停顿的要求，而且解决了CMS的浮动垃圾问题、内
 4）虚引用：形同虚设，不会决定对象的生命周期，只是一个哨兵作用，跟踪对象被垃圾收集器回收的活动，必须与Reference Queue联合使用。
 
 如果一个对象具有虚引用，那么GC在回收对象之前就会把虚引用加入引用队列中，程序可以通过判断引用队列是否有该对象的虚引用来决定是否回收该对象，这也就是哨兵的意思。
+
+使用虚引用的目的就是为了得知对象被GC的时机，所以可以利用虚引用来进行销毁前的一些操作，比如说资源释放等。比如堆外内存的释放。
 
 ![](img\虚引用.jpg)
 
@@ -7521,7 +7608,56 @@ Seata 提供了 AT、TCC、SAGA 和 XA 四种事务模式，可以快速有效�
   	}
   ```
 
+- **ceil**的英文意义是天花板，该方法就**表示向上取整**，Math.ceil(11.3)的结果为12,Math.ceil(-11.3)的结果是-11；**floor**的英文意义是地板，该方法就**表示向下取整**，Math.ceil(11.6)的结果为11,Math.ceil(-11.6)的结果是-12；最难掌握的是**round**方法，它表示**“四舍五入”**，算法为Math.floor(x+0.5)，**即将原来的数字加上0.5后再向下取整**，所以，Math.round(11.5)的结果为12，Math.round(-11.5)的结果为-11。
+
+- **Comparable是排序接口**。若一个类实现了Comparable接口，就意味着该类支持排序。实现了Comparable接口的类的对象的列表或数组可以通过Collections.sort或Arrays.sort进行自动排序。此接口只有一个方法compare，比较此对象与指定对象的顺序，如果该对象小于、等于或大于指定对象，则分别返回负整数、零或正整数。
+
+  ```
+  public class Person implements Comparable<Person>
+  {
+      String name;
+      int age;
+     
+      @Override
+      public int compareTo(Person p)
+      {
+          return this.age-p.getAge();
+      }
+  }
   
+  Arrays.sort(people);
+  ```
 
+  **Comparator是比较接口**，我们如果需要控制某个类的次序，而该类本身不支持排序(即没有实现Comparable接口)，那么我们就可以建立一个“该类的比较器”来进行排序，这个“比较器”只需要实现Comparator接口即可。也就是说，我们可以通过实现Comparator来**新建一个比较器**，然后通过这个比较器对类进行排序。
 
+  ```
+  public class PersonCompartor implements Comparator<Person>
+  {
+      @Override
+      public int compare(Person o1, Person o2)
+      {
+          return o1.getAge()-o2.getAge();
+      }
+  }
+  
+  Arrays.sort(people,new PersonCompartor());
+  ```
+
+  **比较：**
+
+  Comparable是排序接口，若一个类实现了Comparable接口，就意味着“该类支持排序”。而Comparator是比较器，我们若需要控制某个类的次序，可以建立一个“该类的比较器”来进行排序。
+
+  Comparable相当于“内部比较器”，而Comparator相当于“外部比较器”。
+
+  两种方法各有优劣， 用Comparable 简单， 只要实现Comparable 接口的对象直接就成为一个可以比较的对象，但是需要修改源代码。 用Comparator 的好处是不需要修改源代码， 而是另外实现一个比较器， 当某个自定义的对象需要作比较的时候，把比较器和对象一起传递过去就可以比大小了， 并且在Comparator 里面用户可以自己实现复杂的可以通用的逻辑，使其可以匹配一些比较简单的对象，那样就可以节省很多重复劳动了。
+
+- 深拷贝和浅拷贝
+
+  深拷贝会另外创造一个一模一样的对象，新对象跟原对象不共享内存，修改新对象不会改到原对象，是“值”而不是“引用”（不是分支）。
+
+  浅拷贝只复制指向某个对象的指针，而不复制对象本身，新旧对象还是共享同一块内存（分支）。
+
+  clone()方法是浅拷贝。
+
+  如果想要实现深拷贝，可以重写clone()方法。还可以通过构造方法和序列化实现深拷贝。
 
