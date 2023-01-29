@@ -2412,6 +2412,13 @@ DelayQueue 是一个通过PriorityBlockingQueue实现延迟获取元素的**无�
 
   LinkedTransferQueue没有match的操作。没有实现backPressure。
 
+##### Queue实现类之间的区别
+
+- 非线程安全的：ArrayDeque、LinkedList、PriorityQueue
+- 线程安全的：ConcurrentLinkedQueue、ConcurrentLinkedDeque、ArrayBlockingQueue、LinkedBlockingQueue、PriorityBlockingQueue
+- 线程安全的又分为阻塞队列和非阻塞队列，阻塞队列提供了put、take等会阻塞当前线程的方法，比如ArrayBlockingQueue、LinkedBlockingQueue、PriorityBlockingQueue，也有offer、poll等阻塞一段时间候返回的方法；
+- 非阻塞队列是使用CAS机制保证offer、poll等可以线程安全地入队出队，并且不需要加锁，不会阻塞当前线程，比如ConcurrentLinkedQueue、ConcurrentLinkedDeque。
+
 ### Map
 
 ![](img\Map.jpg)
