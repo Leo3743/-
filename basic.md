@@ -282,7 +282,7 @@ Synchronized锁是可重入锁，也就是同一个线程可以多次获得锁�
 
 之所以是轻量级，是因为它仅仅使用 CAS 进行操作，实现获取锁。
 
-轻量级锁的获取：
+轻量级锁的获取（线程结束后不会主动释放偏向锁，当出现偏向锁竞争时，等待全局进入安全点，然后挂起线程进行锁升级）：
 
 如果线程发现对象头中Mark Word已经存在指向自己栈帧的指针，即线程已经获得轻量级锁，那么只需要将0存储在自己的栈帧中（此过程称为递归加锁）；在解锁的时候，如果发现锁记录的内容为0， 那么只需要移除栈帧中的锁记录即可，而不需要更新Mark Word。
 
@@ -372,6 +372,12 @@ public static String concatString(String s1) {
 
 ![](img\对象锁和类锁.jpg)
 
+**CPU如何实现原子操作**
+
+- **1）在硬件层面，CPU依靠总线加锁和缓存锁定机制来实现原子操作。**
+  - 使用总线锁保证原子性。如果多个CPU同时对共享变量进行写操作（i++），通常无法得到期望的值。CPU使用总线锁来保证对共享变量写操作的原子性，当CPU在总线上输出LOCK信号时，其他CPU的请求将被阻塞住，于是该CPU可以独占共享内存。
+  - 使用缓存锁保证原子性。频繁使用的内存地址的数据会缓存于CPU的cache中，那么原子操作只需在CPU内部执行即可，不需要锁住整个总线。缓存锁是指在内存中的数据如果被缓存于CPU的cache中，并且在LOCK操作期间被锁定，那么当它执行锁操作写回到内存时，CPU修改内部的内存地址，并允许它的缓存一致性来保证操作的原子性，因为缓存一致性机制会阻止同时修改由两个以上处理器 缓存的 内存区域数据。当其他CPU回写被锁定的cache行数据时候，会使cache行无效。
+
 ###### 死锁
 
 死锁满足条件：
@@ -435,6 +441,14 @@ state表示锁的状态，waitState表示下一个节点的状态。
   - **可实现公平锁** : `ReentrantLock`可以指定是公平锁还是非公平锁。而`synchronized`只能是非公平锁。所谓的公平锁就是先等待的线程先获得锁。`ReentrantLock`默认情况是非公平的，可以通过 `ReentrantLock`类的`ReentrantLock(boolean fair)`构造方法来制定是否是公平的。
   - **可实现选择性通知（锁可以绑定多个条件）**: `synchronized`关键字与`wait()`和`notify()`/`notifyAll()`方法相结合可以实现等待/通知机制。`ReentrantLock`类当然也可以实现，但是需要借助于`Condition`接口与`newCondition()`方法。
   ```
+
+```
+- 1）层次：前者是JVM实现，后者是JDK实现
+- 2）功能：前者仅能实现互斥与重入，后者可以实现 可中断、可轮询、可定时、可公平、绑定多个条件、非块结构
+  synchronized在阻塞时不会响应中断，Lock会响应中断，并抛出InterruptedException异常。
+- 3）异常：前者线程中抛出异常时JVM会自动释放锁，后者必须手工释放
+- 4）性能：synchronized性能已经大幅优化，如果synchronized能够满足需求，则尽量使用synchronized
+```
 
 **关于中断：**
 
@@ -567,7 +581,7 @@ Semaphore 类似一个资源池（可以类比线程池），每个线程需要�
 
 ###### happens-before
 
-happens-before不是时间关系，是操作顺序和可见性的关系。A happens-before B，如果A在B前发生，那么A带来的变化在B可以观察到（对B时刻在观察的线程可见）。happens-before规则：
+**如果一个操作执行的结果要对另一个操作可见，那么这两个操作之间必须要有happens-before关系。**happens-before不是时间关系，是操作顺序和可见性的关系。A happens-before B，如果A在B前发生，那么A带来的变化在B可以观察到（对B时刻在观察的线程可见）。happens-before规则：
 
 - 程序顺序规则：一个线程中的每个操作，happens-before于该线程中的任意后续操作。
 - 监视器锁规则：对一个锁的解锁，happens-before于随后对这个锁的加锁。
@@ -579,6 +593,20 @@ happens-before不是时间关系，是操作顺序和可见性的关系。A happ
   对象finalize规则：一个对象的初始化完成（构造函数执行结束）先行于发生它的finalize()方法的开始。
 
 happens-before规则提供跨线程的内存可见性保证，让JMM不会对指令重排序（这里的重排序指的是会对结果造成影响的重排序，如果重排序并不会影响程序的正常执行结果，那么重排序就是合法的）。
+
+##### 读写锁
+
+Java读写锁，也就是`ReentrantReadWriteLock`，其包含了读锁和写锁，其中读锁是可以多线程共享的，即共享锁，而写锁是排他锁，在更改时候不允许其他线程操作。读写锁底层是同一把锁（基于同一个AQS），所以会有同一时刻不允许读写锁共存的限制。
+
+对于读写锁来说，如果已加读锁，写锁会阻塞；如果已加写锁，读锁会阻塞。
+
+##### LockSupport
+
+LockSupport使用park()和unpark()来挂起和唤醒线程，LockSupport很类似于二元信号量(**只有1个许可证**可供使用)，如果这个许可还没有被占用，当前线程获取许可并继续执行；如果许可已经被占用，当前线程阻塞，等待获取许可。**许可证默认是被占用的。**
+
+**LockSupport是不可重入**的，如果一个线程连续2次调用LockSupport.park()，那么该线程一定会一直阻塞下去。
+
+**线程如果因为调用park而阻塞的话，能够响应中断请求(中断状态被设置成true)，但是不会抛出InterruptedException**。
 
 ##### 线程和进程区别
 
@@ -855,7 +883,23 @@ JVM提供的轻量级同步机制
 
 通过插入内存屏障指令禁止在内存屏障前后的指令执行重排序优化。
 
+`volatile`在字节码层面，就是使用访问标志：**ACC_VOLATILE**来表示，供后续操作此变量时判断访问标志是否为ACC_VOLATILE，来决定是否遵循volatile的语义处理。volatile的语义处理也就是插入内存屏障（汇编层面就是通过lock指令）。
+
+Intel对lock前缀的说明如下：
+
+- 1）确保对内存的读-改-写操作原子执行（基于总线锁或缓存锁）
+- 2）禁止该指令，与 之前 和 之后 的读写指令重排序
+- 3）把写缓冲区中的所有数据刷新到内存中。
+
 内存屏障：1）保证特定操作的执行顺序；2）保证某些变量的内存可见性；
+
+重排序：
+
+- 1、编译优化重排序。编译器在不改变单线程程序语义的前提下，可以重新安排语句执行顺序。
+- 2、指令级并行的重排序。CPU采用了指令级并行技术将多条指令重叠执行。
+- 3、内存系统的重排序。由于CPU使用cache和读/写缓冲区，因此加载和存储操作可能在乱序执行。
+
+1属于编译器重排序，2和3属于处理器重排序。
 
 ##### 阻塞队列
 
@@ -1728,10 +1772,36 @@ java中的future：
 **Callable、Future、FutureTasK三者的关系：**
 
 - Callable是Runnable封装的异步运算任务。
-
 - Future用来保存Callable异步运算的结果
-
 - FutureTask封装Future的实体类
+
+**Future和FutureTask的区别？**
+
+1. Future是一个接口，FutureTask是一个实现类；
+2. 使用Future初始化一个异步任务结果一般需要搭配线程池的submit，且submit方法有返回值；而初始化一个FutureTask对象需要传入一个实现了Callable接口的类的对象，直接将FutureTask对象submit给线程池，无返回值；
+3. Future + Callable获取结果需要Future对象的get，而FutureTask获取结果直接用FutureTask对象的get方法即可。
+
+```
+// 初始化线程池
+ExecutorService threadPool = Executors.newFixedThreadPool(5);
+// 初始化线程任务
+MyTask myTask = new MyTask(5);
+// 向线程池递交线程任务
+Future<Integer> result = threadPool.submit(myTask);
+// 获取结果
+result.get()
+
+// 初始化线程池
+ExecutorService threadPool = Executors.newFixedThreadPool(5);
+// 初始化MyTask实例
+MyTask myTask = new MyTask(5);
+// 用MyTask的实例对象初始化一个FutureTask对象
+FutureTask<Integer> myFutureTask = new FutureTask<>(myTask);
+// 向线程池递交线程任务
+threadPool.submit(myFutureTask);
+// 获取结果
+myFutureTask.get()
+```
 
 ##### CompletableFuture
 
@@ -1740,6 +1810,38 @@ Future模式虽然好用，但也有一个问题，那就是将任务提交给�
 为了解决这个问题，JDK对Future模式又进行了加强，创建了一个**CompletableFuture**，它可以理解为Future模式的升级版本，它最大的作用是提供了一个回调机制，可以在任务完成后，自动回调一些后续的处理。
 
 ![](img/CompletableFutureDemo.jpg)
+
+#### Fork/Join
+
+双端队列LinkedBlockingDeque适用于另一种相关模式，即工作窃取（work stealing）。每个消费者都有各自的双端队列。如果一个消费者完成了自己双端队列中的全部工作，那么它可以从其他消费者双端队列头部秘密地获取工作。
+
+**做的事情：**
+
+- 第一步分割任务。首先我们需要有一个fork类来把大任务分割成子任务，有可能子任务还是很大，所以还需要不停的分割，直到分割出的子任务足够小。
+- 第二步执行任务并合并结果。分割的子任务分别放在双端队列里，然后几个启动线程分别从双端队列里获取任务执行。子任务执行完的结果都统一放在一个队列里，启动一个线程从队列里拿数据，然后合并这些数据。
+
+**使用两个类去做：**
+
+- ForkJoinTask：我们要使用ForkJoin框架，必须首先创建一个ForkJoin任务。它提供在任务中执行fork()和join()操作的机制（fork是执行子任务，join是取得子任务的结果，用于合并），通常情况下我们不需要直接继承ForkJoinTask类，而只需要继承它的子类，Fork/Join框架提供了以下两个子类：
+  - RecursiveAction：用于没有返回结果的任务。
+  - RecursiveTask ：用于有返回结果的任务。
+- ForkJoinPool ：ForkJoinTask需要通过ForkJoinPool来执行，任务分割出的子任务会添加到当前工作线程所维护的双端队列中，进入队列的头部。当一个工作线程的队列里暂时没有任务时，它会随机从其他工作线程的队列的尾部获取一个任务。
+
+THRESHOLD：临界值，根据这个值判断是否需要fork。
+
+执行流程：
+
+fork()：把分割的新任务push到队列中
+
+join()：从队列获取任务执行得到结果（用LIFO的方法取出任务，也就后进队列的任务先取出来）
+
+（窃取任务用LIFO的方法取出任务，也就后进队列的任务先取出来）
+
+![](img/%E4%BB%BB%E5%8A%A1%E7%AA%83%E5%8F%96.png)
+
+![](img/forkJoin.png)
+
+[Fork/Join工作原理解析_forkjoin原理](https://blog.csdn.net/sermonlizhi/article/details/123292813)
 
 ## JVM
 
@@ -3282,6 +3384,21 @@ Extra：这一列展示的是额外信息
   通过从InnoDB存储空间分布，delete对性能的影响可以看到，delete物理删除既不能释放磁盘空间，而且会产生大量的碎片，导致索引频繁分裂，影响SQL执行计划的稳定性；
 
   同时在碎片回收时，会耗用大量的CPU，磁盘空间，影响表上正常的DML操作。
+  
+- 自增主键不连续的场景？
+
+  1. 自增初始值和自增步长设置不为 1
+
+  2. 唯一键冲突
+
+  3. 事务回滚
+
+     ```
+     为什么在出现唯一键冲突或者回滚的时候，MySQL 没有把表的自增值改回去呢？
+     为了性能，因为申请主键要加锁。
+     ```
+
+  4. 批量插入（如 `insert...select` 语句）。批量主键申请是翻倍的：1、2、4....
 
 ## Spring
 
