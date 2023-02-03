@@ -400,6 +400,8 @@ StampedLock是一种重入锁和读写锁的重要补充。它提供了一种乐
 
 Java 中的大部分同步类（Semaphore、ReentrantLock 等）都是基于 AbstractQueuedSynchronizer（简称为 AQS）实现的。AQS 是一种提供了原子式管理同步状态、阻塞和唤醒线程功能以及队列模型的简单框架。AQS 核心思想是，如果被请求的共享资源空闲，那么就将当前请求资源的线程设置为有效的工作线程，将共享资源设置为锁定状态；如果共享资源被占用，就需要一定的阻塞等待唤醒机制来保证锁分配。这个机制主要用的是 CLH 队列的变体实现的，将暂时获取不到锁的线程加入到队列中。
 
+AQS是一个用于构建锁和同步器的框架，许多同步器都可以通过AQS很容易并且高效地构造出来。不仅ReentrantLock和Semaphore，还包括CountDownLatch、ReentrantReadWriteLock、SynchronousQueue和FutureTask，都是基于AQS构造的。
+
 **AQS 定义两种资源共享方式**
 
 - Exclusive（独占）：只有一个线程能执行，如ReentrantLock。又可分为公平锁和非公平锁：
@@ -1015,6 +1017,34 @@ Fork/Join框架：把大任务分割成若干小任务并行执行，最终汇�
 
 线程池：Blocking Queue（任务队列）、线程
 
+##### CompletionService
+
+CompletionService将Executor和BlockingQueue的概念融合在一起，你可以将Callable任务提交给它来执行，然后使用类似于队列操作的take和poll等方法来获得已完成的结果，而这些结果会在完成时封装为Future。ExecutorCompletionService实现了CompletionService并将计算任务委托给一个Executor。
+
+ExecutorCompletionService的实现非常简单，在构造函数中创建一个BlockingQueue来保存计算完成的结果。当计算完成时，调用FutureTask的done方法。当提交某个任务时，该任务将首先包装为一个QueueingFuture，这是FutureTask的一个子类，然后再改写子类的done方法，并将结果放入BlockingQueue中。take和poll方法委托给了BlockingQueue，这些方法会在得出结果之前阻塞。
+
+多个ExecutorCompletionService可以共享一个Executor，因此可以创建一个对于特定计算私有，又能共享一个公共Executor的ExecutorCompletionService。
+
+```
+public class CompletionServiceTest {
+    public void test() throws InterruptedException, ExecutionException {
+        ExecutorService exec = Executors.newCachedThreadPool();
+        CompletionService<Integer> completionService = new ExecutorCompletionService<Integer>(exec);
+        for (int i = 0; i < 10; i++) {
+            completionService.submit(new Task());
+        }
+        int sum = 0;
+        for (int i = 0; i < 10; i++) {
+        //检索并移除表示下一个已完成任务的 Future，如果目前不存在这样的任务，则等待。  
+            Future<Integer> future = completionService.take();
+            sum += future.get();
+        }
+        System.out.println("总数为：" + sum);
+        exec.shutdown();
+    }
+}
+```
+
 线程池（ThreadPoolExecutor）的参数：
 
 1、corePoolSize：线程池中的初始线程数量，可能处于等待状态。
@@ -1042,6 +1072,13 @@ Fork/Join框架：把大任务分割成若干小任务并行执行，最终汇�
   
   rejectedExecutionHandler 用于处理当线程池不能执行此任务时的情况，默认有抛出 RejectedExecutionException 异常、忽略任务、使用提交任务的线程来执行此任务和将队列中等待最久的任务删除，然后提交此任务这四种策略，默认为抛出异常。
   ```
+
+  workQueue：可以选择以下几个阻塞队列：
+
+  - a）ArrayBlockingQueue：基于数组的有界阻塞队列，FIFO
+  - b)  LinkedBlockingQueue：基于链表的无界阻塞队列，FIFO，吞吐量高于ArrayBlockingQueue，Executors.newFixedThreadPoll()使用了这个队列
+  - c）SynchronousQueue：一个只存储一个元素的阻塞队列，每个插入操作必须等到另一个线程调用移除操作，否则插入一直处于阻塞状态，吞吐量高于LinkedBlockingQueue，Executors#newCachedThreadPoll()使用了这个队列
+  - d）PriorityBlockingQueue：具有优先级的无界阻塞队列
 
 - 说说线程池中的线程创建时机？
 
@@ -1073,6 +1110,8 @@ Fork/Join框架：把大任务分割成若干小任务并行执行，最终汇�
 如果我们设置的线程池数量太小的话，如果同一时间有大量任务/请求需要处理，可能会导致大量的请求/任务在任务队列中排队等待执行，甚至会出现任务队列满了之后任务/请求无法处理的情况，或者大量任务堆积在任务队列导致 OOM。这样很明显是有问题的！ CPU 根本没有得到充分利用。
 
 但是，如果我们设置线程数量太大，大量线程可能会同时在争取 CPU 资源，这样会导致大量的上下文切换，从而增加线程的执行时间，影响了整体执行效率。
+
+任务的等待时间与计算时间的比值决定线程池的线程数量。比值大：I/O 密集型任务；比值小：CPU 密集型任务
 
 - **CPU 密集型任务(N+1)**
 - **I/O 密集型任务(2N)**
@@ -2667,6 +2706,16 @@ ConccurentHashMap   Put()逻辑：
 Monad就是一种[设计模式](https://so.csdn.net/so/search?q=设计模式&spm=1001.2101.3001.7020)，表示将一个运算过程，通过函数拆解成互相连接的多个步骤。你只要提供下一步运算所需的函数，整个运算就会自动进行下去。
 
 ### JUC
+
+实现整个并发体系的真正底层是CPU提供的lock前缀+cmpxchg指令和POSIX的同步原语（mutex&condition）
+
+synchronized和wait&notify基于JVM的monitor，monitor底层又是基于POSIX同步原语。
+
+volatile基于CPU的lock前缀指令实现内存屏障。
+
+而J.U.C是基于LockSupport，底层基于POSIX同步原语。
+
+**lock前缀+cmpxchg指令**：cmpxchg 是 intel CPU 指令集中的一条指令， 这条指令经常用来实现原子锁（compare and change），是CPU对CAS的原语支持，是非原子性的，适合单线程，如果在想要具备原子性，需要加LOCK 前缀，LOCK的主要功能应该是锁内存总线。
 
 ## IO
 
