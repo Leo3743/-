@@ -286,7 +286,7 @@ Synchronized锁是可重入锁，也就是同一个线程可以多次获得锁�
 
 之所以是轻量级，是因为它仅仅使用 CAS 进行操作，实现获取锁。
 
-轻量级锁的获取：
+轻量级锁的获取（线程结束后不会主动释放偏向锁，当出现偏向锁竞争时，等待全局进入安全点，然后挂起线程进行锁升级）：
 
 如果线程发现对象头中Mark Word已经存在指向自己栈帧的指针，即线程已经获得轻量级锁，那么只需要将0存储在自己的栈帧中（此过程称为递归加锁）；在解锁的时候，如果发现锁记录的内容为0， 那么只需要移除栈帧中的锁记录即可，而不需要更新Mark Word。
 
@@ -376,6 +376,12 @@ public static String concatString(String s1) {
 
 ![](img\对象锁和类锁.jpg)
 
+**CPU如何实现原子操作**
+
+- **1）在硬件层面，CPU依靠总线加锁和缓存锁定机制来实现原子操作。**
+  - 使用总线锁保证原子性。如果多个CPU同时对共享变量进行写操作（i++），通常无法得到期望的值。CPU使用总线锁来保证对共享变量写操作的原子性，当CPU在总线上输出LOCK信号时，其他CPU的请求将被阻塞住，于是该CPU可以独占共享内存。
+  - 使用缓存锁保证原子性。频繁使用的内存地址的数据会缓存于CPU的cache中，那么原子操作只需在CPU内部执行即可，不需要锁住整个总线。缓存锁是指在内存中的数据如果被缓存于CPU的cache中，并且在LOCK操作期间被锁定，那么当它执行锁操作写回到内存时，CPU修改内部的内存地址，并允许它的缓存一致性来保证操作的原子性，因为缓存一致性机制会阻止同时修改由两个以上处理器 缓存的 内存区域数据。当其他CPU回写被锁定的cache行数据时候，会使cache行无效。
+
 ###### 死锁
 
 死锁满足条件：
@@ -397,6 +403,8 @@ StampedLock是一种重入锁和读写锁的重要补充。它提供了一种乐
 ##### AQS
 
 Java 中的大部分同步类（Semaphore、ReentrantLock 等）都是基于 AbstractQueuedSynchronizer（简称为 AQS）实现的。AQS 是一种提供了原子式管理同步状态、阻塞和唤醒线程功能以及队列模型的简单框架。AQS 核心思想是，如果被请求的共享资源空闲，那么就将当前请求资源的线程设置为有效的工作线程，将共享资源设置为锁定状态；如果共享资源被占用，就需要一定的阻塞等待唤醒机制来保证锁分配。这个机制主要用的是 CLH 队列的变体实现的，将暂时获取不到锁的线程加入到队列中。
+
+AQS是一个用于构建锁和同步器的框架，许多同步器都可以通过AQS很容易并且高效地构造出来。不仅ReentrantLock和Semaphore，还包括CountDownLatch、ReentrantReadWriteLock、SynchronousQueue和FutureTask，都是基于AQS构造的。
 
 **AQS 定义两种资源共享方式**
 
@@ -565,12 +573,6 @@ Semaphore 类似一个资源池（可以类比线程池），每个线程需要�
 
 ###### happens-before
 
-![](img/happens-before.jpg)
-
-为了
-
-happens-before不是时间关系，是操作顺序和可见性的关系。A happens-before B，如果A在B前发生，那么A带来的变化在B可以观察到（对B时刻在观察的线程可见）。happens-before规则：
-
 - 程序顺序规则：一个线程中的每个操作，happens-before于该线程中的任意后续操作。
 - 监视器锁规则：对一个锁的解锁，happens-before于随后对这个锁的加锁。
 - volatile变量规则：对一个volatile域的写，happens-before于任意后续对这个volatile域的读。
@@ -581,6 +583,20 @@ happens-before不是时间关系，是操作顺序和可见性的关系。A happ
   对象finalize规则：一个对象的初始化完成（构造函数执行结束）先行于发生它的finalize()方法的开始。
 
 **happens-before规则提供跨线程的内存可见性保证**，让JMM不会对指令重排序（这里的重排序指的是会对结果造成影响的重排序，如果重排序并不会影响程序的正常执行结果，那么重排序就是合法的）。
+
+##### 读写锁
+
+Java读写锁，也就是`ReentrantReadWriteLock`，其包含了读锁和写锁，其中读锁是可以多线程共享的，即共享锁，而写锁是排他锁，在更改时候不允许其他线程操作。读写锁底层是同一把锁（基于同一个AQS），所以会有同一时刻不允许读写锁共存的限制。
+
+对于读写锁来说，如果已加读锁，写锁会阻塞；如果已加写锁，读锁会阻塞。
+
+##### LockSupport
+
+LockSupport使用park()和unpark()来挂起和唤醒线程，LockSupport很类似于二元信号量(**只有1个许可证**可供使用)，如果这个许可还没有被占用，当前线程获取许可并继续执行；如果许可已经被占用，当前线程阻塞，等待获取许可。**许可证默认是被占用的。**
+
+**LockSupport是不可重入**的，如果一个线程连续2次调用LockSupport.park()，那么该线程一定会一直阻塞下去。
+
+**线程如果因为调用park而阻塞的话，能够响应中断请求(中断状态被设置成true)，但是不会抛出InterruptedException**。
 
 ##### 线程和进程区别
 
@@ -855,7 +871,23 @@ JVM提供的轻量级同步机制
 
 通过插入内存屏障指令禁止在内存屏障前后的指令执行重排序优化。
 
+`volatile`在字节码层面，就是使用访问标志：**ACC_VOLATILE**来表示，供后续操作此变量时判断访问标志是否为ACC_VOLATILE，来决定是否遵循volatile的语义处理。volatile的语义处理也就是插入内存屏障（汇编层面就是通过lock指令）。
+
+Intel对lock前缀的说明如下：
+
+- 1）确保对内存的读-改-写操作原子执行（基于总线锁或缓存锁）
+- 2）禁止该指令，与 之前 和 之后 的读写指令重排序
+- 3）把写缓冲区中的所有数据刷新到内存中。
+
 内存屏障：1）保证特定操作的执行顺序；2）保证某些变量的内存可见性；
+
+重排序：
+
+- 1、编译优化重排序。编译器在不改变单线程程序语义的前提下，可以重新安排语句执行顺序。
+- 2、指令级并行的重排序。CPU采用了指令级并行技术将多条指令重叠执行。
+- 3、内存系统的重排序。由于CPU使用cache和读/写缓冲区，因此加载和存储操作可能在乱序执行。
+
+1属于编译器重排序，2和3属于处理器重排序。
 
 ##### 阻塞队列
 
@@ -971,6 +1003,34 @@ Fork/Join框架：把大任务分割成若干小任务并行执行，最终汇�
 
 线程池：Blocking Queue（任务队列）、线程
 
+##### CompletionService
+
+CompletionService将Executor和BlockingQueue的概念融合在一起，你可以将Callable任务提交给它来执行，然后使用类似于队列操作的take和poll等方法来获得已完成的结果，而这些结果会在完成时封装为Future。ExecutorCompletionService实现了CompletionService并将计算任务委托给一个Executor。
+
+ExecutorCompletionService的实现非常简单，在构造函数中创建一个BlockingQueue来保存计算完成的结果。当计算完成时，调用FutureTask的done方法。当提交某个任务时，该任务将首先包装为一个QueueingFuture，这是FutureTask的一个子类，然后再改写子类的done方法，并将结果放入BlockingQueue中。take和poll方法委托给了BlockingQueue，这些方法会在得出结果之前阻塞。
+
+多个ExecutorCompletionService可以共享一个Executor，因此可以创建一个对于特定计算私有，又能共享一个公共Executor的ExecutorCompletionService。
+
+```
+public class CompletionServiceTest {
+    public void test() throws InterruptedException, ExecutionException {
+        ExecutorService exec = Executors.newCachedThreadPool();
+        CompletionService<Integer> completionService = new ExecutorCompletionService<Integer>(exec);
+        for (int i = 0; i < 10; i++) {
+            completionService.submit(new Task());
+        }
+        int sum = 0;
+        for (int i = 0; i < 10; i++) {
+        //检索并移除表示下一个已完成任务的 Future，如果目前不存在这样的任务，则等待。  
+            Future<Integer> future = completionService.take();
+            sum += future.get();
+        }
+        System.out.println("总数为：" + sum);
+        exec.shutdown();
+    }
+}
+```
+
 线程池（ThreadPoolExecutor）的参数：
 
 1、corePoolSize：线程池中的初始线程数量，可能处于等待状态。
@@ -998,6 +1058,13 @@ Fork/Join框架：把大任务分割成若干小任务并行执行，最终汇�
   
   rejectedExecutionHandler 用于处理当线程池不能执行此任务时的情况，默认有抛出 RejectedExecutionException 异常、忽略任务、使用提交任务的线程来执行此任务和将队列中等待最久的任务删除，然后提交此任务这四种策略，默认为抛出异常。
   ```
+
+  workQueue：可以选择以下几个阻塞队列：
+
+  - a）ArrayBlockingQueue：基于数组的有界阻塞队列，FIFO
+  - b)  LinkedBlockingQueue：基于链表的无界阻塞队列，FIFO，吞吐量高于ArrayBlockingQueue，Executors.newFixedThreadPoll()使用了这个队列
+  - c）SynchronousQueue：一个只存储一个元素的阻塞队列，每个插入操作必须等到另一个线程调用移除操作，否则插入一直处于阻塞状态，吞吐量高于LinkedBlockingQueue，Executors#newCachedThreadPoll()使用了这个队列
+  - d）PriorityBlockingQueue：具有优先级的无界阻塞队列
 
 - 说说线程池中的线程创建时机？
 
@@ -1029,6 +1096,8 @@ Fork/Join框架：把大任务分割成若干小任务并行执行，最终汇�
 如果我们设置的线程池数量太小的话，如果同一时间有大量任务/请求需要处理，可能会导致大量的请求/任务在任务队列中排队等待执行，甚至会出现任务队列满了之后任务/请求无法处理的情况，或者大量任务堆积在任务队列导致 OOM。这样很明显是有问题的！ CPU 根本没有得到充分利用。
 
 但是，如果我们设置线程数量太大，大量线程可能会同时在争取 CPU 资源，这样会导致大量的上下文切换，从而增加线程的执行时间，影响了整体执行效率。
+
+任务的等待时间与计算时间的比值决定线程池的线程数量。比值大：I/O 密集型任务；比值小：CPU 密集型任务
 
 - **CPU 密集型任务(N+1)**
 - **I/O 密集型任务(2N)**
@@ -1703,10 +1772,36 @@ java中的future：
 **Callable、Future、FutureTasK三者的关系：**
 
 - Callable是Runnable封装的异步运算任务。
-
 - Future用来保存Callable异步运算的结果
-
 - FutureTask封装Future的实体类
+
+**Future和FutureTask的区别？**
+
+1. Future是一个接口，FutureTask是一个实现类；
+2. 使用Future初始化一个异步任务结果一般需要搭配线程池的submit，且submit方法有返回值；而初始化一个FutureTask对象需要传入一个实现了Callable接口的类的对象，直接将FutureTask对象submit给线程池，无返回值；
+3. Future + Callable获取结果需要Future对象的get，而FutureTask获取结果直接用FutureTask对象的get方法即可。
+
+```
+// 初始化线程池
+ExecutorService threadPool = Executors.newFixedThreadPool(5);
+// 初始化线程任务
+MyTask myTask = new MyTask(5);
+// 向线程池递交线程任务
+Future<Integer> result = threadPool.submit(myTask);
+// 获取结果
+result.get()
+
+// 初始化线程池
+ExecutorService threadPool = Executors.newFixedThreadPool(5);
+// 初始化MyTask实例
+MyTask myTask = new MyTask(5);
+// 用MyTask的实例对象初始化一个FutureTask对象
+FutureTask<Integer> myFutureTask = new FutureTask<>(myTask);
+// 向线程池递交线程任务
+threadPool.submit(myFutureTask);
+// 获取结果
+myFutureTask.get()
+```
 
 ##### CompletableFuture
 
@@ -1715,6 +1810,38 @@ Future模式虽然好用，但也有一个问题，那就是将任务提交给�
 为了解决这个问题，JDK对Future模式又进行了加强，创建了一个**CompletableFuture**，它可以理解为Future模式的升级版本，它最大的作用是提供了一个回调机制，可以在任务完成后，自动回调一些后续的处理。
 
 ![](img/CompletableFutureDemo.jpg)
+
+#### Fork/Join
+
+双端队列LinkedBlockingDeque适用于另一种相关模式，即工作窃取（work stealing）。每个消费者都有各自的双端队列。如果一个消费者完成了自己双端队列中的全部工作，那么它可以从其他消费者双端队列头部秘密地获取工作。
+
+**做的事情：**
+
+- 第一步分割任务。首先我们需要有一个fork类来把大任务分割成子任务，有可能子任务还是很大，所以还需要不停的分割，直到分割出的子任务足够小。
+- 第二步执行任务并合并结果。分割的子任务分别放在双端队列里，然后几个启动线程分别从双端队列里获取任务执行。子任务执行完的结果都统一放在一个队列里，启动一个线程从队列里拿数据，然后合并这些数据。
+
+**使用两个类去做：**
+
+- ForkJoinTask：我们要使用ForkJoin框架，必须首先创建一个ForkJoin任务。它提供在任务中执行fork()和join()操作的机制（fork是执行子任务，join是取得子任务的结果，用于合并），通常情况下我们不需要直接继承ForkJoinTask类，而只需要继承它的子类，Fork/Join框架提供了以下两个子类：
+  - RecursiveAction：用于没有返回结果的任务。
+  - RecursiveTask ：用于有返回结果的任务。
+- ForkJoinPool ：ForkJoinTask需要通过ForkJoinPool来执行，任务分割出的子任务会添加到当前工作线程所维护的双端队列中，进入队列的头部。当一个工作线程的队列里暂时没有任务时，它会随机从其他工作线程的队列的尾部获取一个任务。
+
+THRESHOLD：临界值，根据这个值判断是否需要fork。
+
+执行流程：
+
+fork()：把分割的新任务push到队列中
+
+join()：从队列获取任务执行得到结果（用LIFO的方法取出任务，也就后进队列的任务先取出来）
+
+（窃取任务用LIFO的方法取出任务，也就后进队列的任务先取出来）
+
+![](img/%E4%BB%BB%E5%8A%A1%E7%AA%83%E5%8F%96.png)
+
+![](img/forkJoin.png)
+
+[Fork/Join工作原理解析_forkjoin原理](https://blog.csdn.net/sermonlizhi/article/details/123292813)
 
 ## JVM
 
@@ -2475,6 +2602,16 @@ Monad就是一种[设计模式](https://so.csdn.net/so/search?q=设计模式&spm
 
 ### JUC
 
+实现整个并发体系的真正底层是CPU提供的lock前缀+cmpxchg指令和POSIX的同步原语（mutex&condition）
+
+synchronized和wait&notify基于JVM的monitor，monitor底层又是基于POSIX同步原语。
+
+volatile基于CPU的lock前缀指令实现内存屏障。
+
+而J.U.C是基于LockSupport，底层基于POSIX同步原语。
+
+**lock前缀+cmpxchg指令**：cmpxchg 是 intel CPU 指令集中的一条指令， 这条指令经常用来实现原子锁（compare and change），是CPU对CAS的原语支持，是非原子性的，适合单线程，如果在想要具备原子性，需要加LOCK 前缀，LOCK的主要功能应该是锁内存总线。
+
 ## IO
 
 IO分为同步IO和异步IO，首先一个I/O操作其实分成了两个步骤：**发起IO请求和实际的IO操作**。同步I/O和异步I/O的区别就在于第二个步骤是否阻塞，如果实际的I/O读写阻塞请求进程，那么就是同步I/O，因此阻塞I/O、非阻塞I/O、I/O复用、信号驱动I/O都是同步I/O，如果不阻塞，而是操作系统帮你做完I/O操作再将结果返回给你，那么就是异步I/O。同步IO又可以分为同步阻塞IO和同步非阻塞IO，阻塞I/O和非阻塞I/O的区别在于第一步，发起I/O请求是否会被阻塞，如果阻塞直到完成那么就是传统的阻塞I/O，如果不阻塞，那么就是非阻塞I/O。
@@ -3191,6 +3328,21 @@ Extra：这一列展示的是额外信息
   通过从InnoDB存储空间分布，delete对性能的影响可以看到，delete物理删除既不能释放磁盘空间，而且会产生大量的碎片，导致索引频繁分裂，影响SQL执行计划的稳定性；
 
   同时在碎片回收时，会耗用大量的CPU，磁盘空间，影响表上正常的DML操作。
+  
+- 自增主键不连续的场景？
+
+  1. 自增初始值和自增步长设置不为 1
+
+  2. 唯一键冲突
+
+  3. 事务回滚
+
+     ```
+     为什么在出现唯一键冲突或者回滚的时候，MySQL 没有把表的自增值改回去呢？
+     为了性能，因为申请主键要加锁。
+     ```
+
+  4. 批量插入（如 `insert...select` 语句）。批量主键申请是翻倍的：1、2、4....
 
 ## Spring
 
