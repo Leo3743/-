@@ -182,13 +182,17 @@ unix提供了一种机制可以保证只要父进程想知道子进程结束时�
 
 2）同步非静态方法（synchronized method），锁是当前对象的实例对象
 
+**当锁同一个对象时，多个线程会互斥。**
+
+**对象锁和类锁互不影响。**
+
 获取类锁的两种方法：
 
 1）同步代码块（synchronized(类.class)，锁是()中的类对象）
 
 2）同步静态方法（synchronized static method，锁的当前对象是类对象）
 
-**对象锁的作用范围是，同一个对象内的不同线程，而类锁则可以控制不同对象中的不同线程。**
+**不管多少对象都共用同一把锁，同步执行，一个线程执行结束、其他的才能够调用同步的部分。**
 
 **Synchronized如何保证可见性、有序性和可重入性？**
 
@@ -294,7 +298,7 @@ Synchronized锁是可重入锁，也就是同一个线程可以多次获得锁�
 
 ###### 重量级锁
 
-重量级锁（`heavy weight lock`），是使用操作系统互斥量（`mutex`）来实现的传统锁。 当所有对锁的优化都失效时，将退回到重量级锁。它与轻量级锁不同竞争的线程不再通过自旋来竞争线程， 而是直接进入堵塞状态，此时不消耗CPU，然后等拥有锁的线程释放锁后，唤醒堵塞的线程， 然后线程再次竞争锁。但是注意，当锁膨胀（`inflate`）为重量锁时，就不能再退回到轻量级锁。
+重量级锁（`heavy weight lock`），是使用操作系统互斥量（`mutex`）来实现的传统锁。 当所有对锁的优化都失效时，将退回到重量级锁。它与轻量级锁不同的是竞争的线程不再通过自旋来竞争线程， 而是直接进入堵塞状态，此时不消耗CPU，然后等拥有锁的线程释放锁后，唤醒堵塞的线程， 然后线程再次竞争锁。但是注意，当锁膨胀（`inflate`）为重量锁时，就不能再退回到轻量级锁。
 
 偏向锁适合一个线程对一个锁的多次获取的情况; 轻量级锁适合锁执行体比较简单(即减少锁粒度或时间), 自旋一会儿就可以成功获取锁的情况。
 
@@ -462,18 +466,6 @@ waitState五种状态：
   - **可实现选择性通知（锁可以绑定多个条件）**: `synchronized`关键字与`wait()`和`notify()`/`notifyAll()`方法相结合可以实现等待/通知机制。`ReentrantLock`类当然也可以实现，但是需要借助于`Condition`接口与`newCondition()`方法。
   ```
 
-```
-- 1）层次：前者是JVM实现，后者是JDK实现
-- 2）功能：前者仅能实现互斥与重入，后者可以实现 可中断、可轮询、可定时、可公平、绑定多个条件、非块结构
-  synchronized在阻塞时不会响应中断，Lock会响应中断，并抛出InterruptedException异常。
-- 3）异常：前者线程中抛出异常时JVM会自动释放锁，后者必须手工释放
-- 4）性能：synchronized性能已经大幅优化，如果synchronized能够满足需求，则尽量使用synchronized
-```
-
-**关于中断：**
-
-Synchronized不可中断的说法：**只有获取到锁之后才能中断，等待锁时不可中断。**也就是这里的不可中断，指的是等待不可中断；`ReentrantLock.lockInterruptibly()`首次尝试获取锁之前就会判断是否应该中断，如果没有获取到锁，在自旋等待的时候也会继续判断中断状态。
-
 ###### 公平锁和非公平锁
 
 公平锁和非公平锁只有两处不同：
@@ -484,8 +476,6 @@ Synchronized不可中断的说法：**只有获取到锁之后才能中断，等
 公平锁和非公平锁就这两点区别，如果这两次 CAS 都不成功，那么后面非公平锁和公平锁是一样的，都要进入到阻塞队列等待唤醒。
 
 相对来说，非公平锁会有更好的性能，因为它的吞吐量比较大。当然，非公平锁让获取锁的时间变得更加不确定，可能会导致在阻塞队列中的线程长期处于饥饿状态。
-
-**吞吐量大的原因：**在恢复一个被挂起的线程与该线程真正运行之间存在着严重的延迟。这可能导致当锁处于可用状态时，线程却还处于被唤醒的过程中，浪费性能。
 
 ###### Condition
 
@@ -601,8 +591,6 @@ Semaphore 类似一个资源池（可以类比线程池），每个线程需要�
 
 ###### happens-before
 
-**如果一个操作执行的结果要对另一个操作可见，那么这两个操作之间必须要有happens-before关系。**happens-before不是时间关系，是操作顺序和可见性的关系。A happens-before B，如果A在B前发生，那么A带来的变化在B可以观察到（对B时刻在观察的线程可见）。happens-before规则：
-
 - 程序顺序规则：一个线程中的每个操作，happens-before于该线程中的任意后续操作。
 - 监视器锁规则：对一个锁的解锁，happens-before于随后对这个锁的加锁。
 - volatile变量规则：对一个volatile域的写，happens-before于任意后续对这个volatile域的读。
@@ -612,7 +600,7 @@ Semaphore 类似一个资源池（可以类比线程池），每个线程需要�
 - 程序中断规则：对线程interrupted()方法的调用先行于被中断线程的代码检测到中断时间的发生。
   对象finalize规则：一个对象的初始化完成（构造函数执行结束）先行于发生它的finalize()方法的开始。
 
-happens-before规则提供跨线程的内存可见性保证，让JMM不会对指令重排序（这里的重排序指的是会对结果造成影响的重排序，如果重排序并不会影响程序的正常执行结果，那么重排序就是合法的）。
+**happens-before规则提供跨线程的内存可见性保证**，让JMM不会对指令重排序（这里的重排序指的是会对结果造成影响的重排序，如果重排序并不会影响程序的正常执行结果，那么重排序就是合法的）。
 
 ##### 读写锁
 
@@ -854,8 +842,6 @@ public class Test {
     }
 }
 ```
-
-
 
 #### JMM
 
@@ -1139,31 +1125,6 @@ public class CompletionServiceTest {
 线程池执行任务流程：
 
 ![](img/%E7%BA%BF%E7%A8%8B%E6%B1%A0%E6%89%A7%E8%A1%8C%E4%BB%BB%E5%8A%A1%E6%B5%81%E7%A8%8B.png)
-
-##### execute执行流程
-
-1. 当`workerCount < corePoolSize`，创建线程执行任务。
-2. 当`workerCount >= corePoolSize`&&阻塞队列`workQueue`未满，把新的任务放入阻塞队列。
-3. 当`workQueue`已满，并且`workerCount >= corePoolSize`，并且`workerCount < maximumPoolSize`，创建线程执行任务。
-4. 当workQueue已满，`workerCount >= maximumPoolSize`，采取拒绝策略,默认拒绝策略是直接抛异常。
-
-![](img/execute%E6%89%A7%E8%A1%8C%E6%B5%81%E7%A8%8B.jpg)
-
-##### addWorker执行流程
-
-主要工作是在线程池中创建一个新的线程并执行。
-
-![](img/addWorker.png)
-
-**Worker为什么不使用ReentrantLock来实现呢？**
-
-tryAcquire方法它是不允许重入的，而ReentrantLock是允许重入的。对于线程来说，如果线程正在执行是不允许其它锁重入进来的。
-
-线程只需要两个状态，一个是独占锁，表明正在执行任务；一个是不加锁，表明是空闲状态。
-
-**为什么需要持有mainLock？**
-
-因为workers是HashSet类型的，不能保证线程安全。
 
 #### 寻址和存储
 
@@ -2020,66 +1981,6 @@ Tomact是web容器，可能需要部署多个应用程序。不同的应用程�
 
 ### Java的内存模型
 
-#### 堆外内存
-
-##### 定义
-
-对外内存又成为直接内存，内存对象分配在Java虚拟机的堆以外的内存，这些内存直接受操作系统管理（而不是虚拟机），这样做的结果就是能够在一定程度上减少垃圾回收对应用程序造成的影响。使用未公开的Unsafe和NIO包下ByteBuffer来创建堆外内存。
-
-**使用对外内存的原因？**
-
-- 减少了垃圾回收
-
-- 提升复制速度(io效率)
-
-  **直接使用堆外内存可以减少一次内存拷贝：** 当进行网络 `I/O` 操作、文件读写时，堆内内存都需要转换为堆外内存，然后再与底层设备进行交互。因为：1、**操作系统并不感知 `JVM` 的堆内存**；2、**同一个对象的内存地址随着 `JVM GC` 的执行可能会随时发生变化**。
-
-##### 创建方式
-
-ByteBuffer：字节缓冲区，它有两种实现：
-
-- HeapByteBuffer：使用jvm堆内存的字节缓冲区；（对应 ByteBuffer源码中的 allocate()方法）
-
-- DirectByteBuffer：使用堆外内存，不受jvm堆大小限制；（对应 ByteBuffer源码中的allocateDirect()方法）
-
-  DirectByteBuffer：ByteBuffer对于使用堆外内存的实现，堆外内存直接使用unsafe方法请求堆外内存空间，读写数据；
-
-堆外内存默认大小为64M；如果指定了jvm参数（-XX:MaxDirectMemorySize=512m），就使用指定的大小值。
-
-##### 内存分配
-
-**`Java` 中堆外内存的分配方式有两种：**
-
-1. `NIO`类中的`ByteBuffer#allocateDirect`
-2. `Unsafe#allocateMemory`
-
-![](img/%E5%A0%86%E5%A4%96%E5%86%85%E5%AD%98%E5%88%86%E9%85%8D.png)
-
-**`DirectByteBuffer` 对象：** 存放在堆内存里，仅仅包含堆外内存的地址、大小等属性。同时还会创建对应的 `Cleaner` 对象，通过 `ByteBuffer` 分配的堆外内存不需要手动回收，它可以被 `JVM` 自动回收。
-
-> 当堆内的 `DirectByteBuffer` 对象被 `GC` 回收时，**`Cleaner` 就会用于回收对应的堆外内存**。
-
-##### 内存回收
-
-**堆外内存回收，有两种方式：**
-
-1. **`Full GC` 时以及调用 `System.gc()`：** 通过 `JVM` 参数 `-XX:MaxDirectMemorySize` 指定堆外内存的上限大小，当堆外内存的大小超过该阈值时，就会触发一次 `Full GC` 进行清理回收，如果在 `Full GC` 之后还是无法满足堆外内存的分配，那么程序将会抛出 `OOM` 异常。
-2. **使用`unsafe.freeMemory(address);` 来回收：** `DirectByteBuffer` 在初始化时会创建一个 **`Cleaner` 对象**，`Cleaner` 内同时会创建 `Deallocator`，调用 `Deallocator#run()` 来回收。
-
-一般情况下，当堆内的 `DirectByteBuffer` 对象被 `GC` 回收时，`Cleaner` 就会用于回收对应的堆外内存，但是如果`DirectByteBuffer`对象长时间没有被回收（进入老年代），那么堆外内存就会出现溢出的可能，此时需要手动使用上面两种方式实现堆外内存的回收。
-
-**Cleaner对象**
-
-`DirectByteBuffer` 在初始化时会创建一个 `Cleaner` 对象，`Cleaner`是PhantomReference的子类，它会负责堆外内存的回收工作。
-
-![](img/%E5%A0%86%E5%A4%96%E5%86%85%E5%AD%98%E8%99%9A%E5%BC%95%E7%94%A8.png)
-
-当 `DirectByteBuffer` 被回收的时候，会调用 `Cleaner` 的 `clean()` 方法来释放堆外内存。
-
-
-
-
-
 ### Java垃圾回收
 
 **什么是垃圾：**没有被其他对象引用。
@@ -2321,8 +2222,6 @@ G1不仅满足低停顿的要求，而且解决了CMS的浮动垃圾问题、内
 
 如果一个对象具有虚引用，那么GC在回收对象之前就会把虚引用加入引用队列中，程序可以通过判断引用队列是否有该对象的虚引用来决定是否回收该对象，这也就是哨兵的意思。
 
-使用虚引用的目的就是为了得知对象被GC的时机，所以可以利用虚引用来进行销毁前的一些操作，比如说资源释放等。比如堆外内存的释放。
-
 ![](img\虚引用.jpg)
 
 ![](img\四种引用.jpg)
@@ -2504,7 +2403,7 @@ PriorityQueue：基于堆结构实现，可以用它来实现优先队列。元�
 - `PriorityQueue` 利用了二叉堆的数据结构来实现的，底层使用可变长的数组来存储数据
 - `PriorityQueue` 通过堆元素的上浮和下沉，实现了在 O(logn) 的时间复杂度内插入元素和删除堆顶元素。
 - `PriorityQueue` 是非线程安全的，且不支持存储 `NULL` 和 `non-comparable` 的对象。
-- `PriorityQueue` 默认是小顶堆，但可以接收一个 `Comparator` 作为构造参数，从而来自定义元素优先级的先后。
+- `PriorityQueue` 默认是小根堆，但可以接收一个 `Comparator` 作为构造参数，从而来自定义元素优先级的先后。
 
 ##### Queue 与 Deque 的区别
 
@@ -2526,7 +2425,11 @@ BlockingQueue 是一个**先进先出**的队列（Queue），为什么说是阻
 
   ArrayBlockingQueue 实现并发同步的原理就是，读操作和写操作都需要获取到 AQS 独占锁才能进行操作。如果队列为空，这个时候读操作的线程进入到**读线程队列**排队，等待写线程写入新的元素，然后唤醒读线程队列的第一个等待线程。如果队列已满，这个时候写操作的线程进入到**写线程队列**排队，等待读线程将队列元素移除腾出空间，然后唤醒写线程队列的第一个等待线程。
 
+  **一把锁对应两个条件队列。**
+
 - LinkedBlockingQueue，底层基于单向链表实现的阻塞队列，可以当做无界队列也可以当做有界队列来使用。
+
+  **两把锁各自对应一个条件队列。**
 
 - SynchronousQueue，同步队列，这里说的同步并不是多线程的并发问题，而是因为当一个线程往队列中写入一个元素时，写入操作不会立即返回，需要等待另一个线程来将这个元素拿走；同理，当一个读线程做读操作的时候，同样需要一个相匹配的写线程的写操作。这里的 Synchronous 指的就是读线程和写线程需要同步，一个读线程匹配一个写线程。
 
@@ -2579,13 +2482,6 @@ DelayQueue 是一个通过PriorityBlockingQueue实现延迟获取元素的**无�
 
   LinkedTransferQueue没有match的操作。没有实现backPressure。
 
-##### Queue实现类之间的区别
-
-- 非线程安全的：ArrayDeque、LinkedList、PriorityQueue
-- 线程安全的：ConcurrentLinkedQueue、ConcurrentLinkedDeque、ArrayBlockingQueue、LinkedBlockingQueue、PriorityBlockingQueue
-- 线程安全的又分为阻塞队列和非阻塞队列，阻塞队列提供了put、take等会阻塞当前线程的方法，比如ArrayBlockingQueue、LinkedBlockingQueue、PriorityBlockingQueue，也有offer、poll等阻塞一段时间候返回的方法；
-- 非阻塞队列是使用CAS机制保证offer、poll等可以线程安全地入队出队，并且不需要加锁，不会阻塞当前线程，比如ConcurrentLinkedQueue、ConcurrentLinkedDeque。
-
 ### Map
 
 ![](img\Map.jpg)
@@ -2612,10 +2508,9 @@ JDK1.8 之后在解决哈希冲突时有了较大的变化，当链表长度大�
 
 **HashMap的数组长度为什么需要是2的幂次方?**
 
-HashMap为了存取高效，要尽量较少碰撞，就是要尽量把数据分配均匀，每个[链表](https://so.csdn.net/so/search?q=链表&spm=1001.2101.3001.7020)长度大致相同，这个实现就在把数据存到哪个链表中的算法；
+HashMap为了存取高效，要尽量较少碰撞，就是要尽量把数据分配均匀，每个[链表](https://so.csdn.net/so/search?q=链表&spm=1001.2101.3001.7020)长度大致相同，这个实现就是把数据存到哪个链表中的算法；
 这个算法实际就是取模，**hash % length**，计算机中直接求余效率不如位移运算，[源码](https://so.csdn.net/so/search?q=源码&spm=1001.2101.3001.7020)中做了优化 **hash & (
-length - 1 )**，
-**hash % length == hash & ( length - 1 )** 的前提是length是2的n次方； 为什么这样能均匀分布减少碰撞呢？2的n次方实际就是1后面n个0，2的n次方-1 实际就是n个1；
+length - 1 )**，**hash % length == hash & ( length - 1 )** 的前提是length是2的n次方； 为什么这样能均匀分布减少碰撞呢？2的n次方实际就是1后面n个0，2的n次方-1 实际就是n个1；
 
 另外一个简短的解释，2^n也就是说2的n次方的主要核心原因是[hash](https://so.csdn.net/so/search?q=hash&spm=1001.2101.3001.7020)函数的源码中右移了16位让低位保留高位信息，原本的低位信息不要，那么进行&操作另一个数低位必须全是1，否则没有意义，所以len必须是2 ^n ，这样能实现分布均匀，有效减少hash碰撞！
 
@@ -3250,7 +3145,7 @@ Mysql的锁：
 
 ![](img/mysql%E7%9A%84%E9%94%81.png)
 
-活锁：程序没有阻塞，但也没有进展，一直消耗系统资源。比如消息队列一直重试失败的消息。（假如把该消息放在队列的头中, 即每次重试的都是该失败的消息, 并且 该消息依赖的服务处了问题, 处理该消息就会一直失败, 那么就造成了活锁. 即没有进入阻塞状态, 但程序无法继续下去 ）
+活锁：某个事务可能永远等待某锁。
 
 死锁：两个或两个以上的事务互相等待对方释放锁，且永远不可能等到。
 
@@ -3866,7 +3761,7 @@ Redis集群中所有的节点都要承担状态维护的任务。
 
   原因：第一次访问；恶意访问不存在的key；key过期。
 
-  解决：服务器启动时，提前写入；规范key的命名，通过中间件拦截；对某些高频访问的key，设置合理的  TTL或永不过期。使用锁。一个时刻只能有一个请求到达数据库，其他请求等待，sleep之后重新查redis，没有再获取锁去请求数据库。
+  解决：服务器启动时，提前写入；规范key的命名，通过中间件拦截；对某些高频访问的key，设置合理的TTL或永不过期。使用锁。一个时刻只能有一个请求到达数据库，其他请求等待，sleep之后重新查redis，没有再获取锁去请求数据库。
 
 - redis穿透
 
@@ -3876,22 +3771,20 @@ Redis集群中所有的节点都要承担状态维护的任务。
 
   解决：缓存null值（缓存了更多无用的key，浪费空间，解决：设置短的过期时间；缓存层和存储层的数据会有一段时间窗口的不一致，解决：使用消息队列或者其他异步方式清理缓存中对象）
 
-  
-
   **布隆过滤器**：除了缓存空对象，我们还可以在存储和缓存之前，加一个布隆过滤器，做一层过滤。
 
-  **布隆过滤器：**一种来检索元素是否在给定大集合中的数据结构，这种数据结构是高效且性能很好的，但缺点是具有一定的错误识别率和删除难度。它是一个连续的数据结构，每个存储位存储都是一个`bit`，即`0`或者`1`, 来标识数据是否存在。存储数据的时时候，使用K个不同的哈希函数将这个变量映射为bit列表的的K个点，把它们置为1。
+  **布隆过滤器：**一种来检索元素是否在给定大集合中的数据结构，这种数据结构是高效且性能很好的，但缺点是具有一定的错误识别率和删除难度。它是一个连续的数据结构，每个存储位存储都是一个`bit`，即`0`或者`1`, 来标识数据是否存在。存储数据的时时候，使用K个不同的哈希函数将这个变量映射为bit列表的的K个点，把它们置1。
 
   **当一个元素加入布隆过滤器中的时候，会进行如下操作：**
 
   1. 使用布隆过滤器中的哈希函数对元素值进行计算，得到哈希值（有几个哈希函数得到几个哈希值）。
   2. 根据得到的哈希值，在位数组中把对应下标的值置为 1。
-
+  
   **当我们需要判断一个元素是否存在于布隆过滤器的时候，会进行如下操作：**
 
   1. 对给定元素再次进行相同的哈希计算；
   2. 得到值之后判断位数组中的每个元素是否都为 1，如果值都为 1，那么说明这个值在布隆过滤器中，如果存在一个值不为 1，说明该元素不在布隆过滤器中。
-
+  
 - 雪崩
 
   概念：Redis缓存层由于某种原因宕机后，所有的请求会涌向存储层，短时间内的高并发请求可能会导致存储层挂机，称之为“Redis雪崩”。
@@ -3959,7 +3852,7 @@ Redis集群中所有的节点都要承担状态维护的任务。
 
   随着redis集群节点的扩展，系统的性能不但没有好转反而下降了。
 
-  **原因：**键值数据库由于通常采用哈希函数将 key映射到各个节点上，造成key的分布与业务无关，但是由于数据量和访问量的持续增长，造成需要添加大量节点做水平扩容，导致键值分布到更多的 节点上，所以无论是Memcache还是Redis的分布式，批量操作通常需要从不同节点上获取，相比于单机批量操作只涉及一次网络操作，分布式批量操作会涉及多次网络时间。
+  **原因：**键值数据库由于通常采用哈希函数将 key映射到各个节点上，造成key的分布与业务无关，但是由于数据量和访问量的持续增长，造成需要添加大量节点做水平扩容，导致键值分布到更多的节点上，所以无论是Memcache还是Redis的分布式，批量操作通常需要从不同节点上获取，相比于单机批量操作只涉及一次网络操作，分布式批量操作会涉及多次网络时间。
 
   - 客户端一次批量操作会涉及多次网络操作，也就意味着批量操作会随着节点的增多，耗时会不断增大。
   - 网络连接数变多，对节点的性能也有一定影响。
@@ -3978,6 +3871,8 @@ Redis集群中所有的节点都要承担状态维护的任务。
   4. allkeys-random：随机删除所有键，直到腾出足够空间为止。
   5. volatile-random：随机删除过期键，直到腾出足够空间为止。
   6. volatile-ttl：根据键值对象的ttl属性，删除最近将要过期数据。如果没有，回退到noeviction策略。
+  6. volatile-lfu：根据lfu算法，从设置了超时属性（expire）的键中删除。
+  6. allkeys-lfu：根据lfu算法，从所有key中删除。
   
 - Redis数据删除？定时删除、惰性删除、定期删除？
 
@@ -5421,7 +5316,7 @@ Dubbo 对配置文件目录的约定分为了三类目录：
 
 总结地说无非就是通过配置组成 URL ，然后通过自适应得到对于的实现类进行服务引入，如果是注册中心那么会向注册中心注册自己的信息，然后订阅注册中心相关信息，得到远程 `provider`的 ip 等信息，再通过`netty`客户端进行连接。
 
-并且通过`directory` 和 `cluster` 进行底层多个服务提供者的屏蔽、容错和负载均衡等，这个之后文章会详细分析，最终得到封装好的 `invoker`再通过动态代理封装得到代理类，让接口调用者无感知的调用方法。
+并且通过`directory` 和 `cluster` 进行底层多个服务提供者的屏蔽、容错和负载均衡等，最终得到封装好的 `invoker`再通过动态代理封装得到代理类，让接口调用者无感知的调用方法。
 
 ![](img/dubbo%E6%9C%8D%E5%8A%A1%E5%BC%95%E5%85%A5.png)
 
@@ -6152,7 +6047,7 @@ fileBeat收集其他应用的数据，然后发送给logStash做数据处理，�
 
   text 类型：当一个字段是要被[全文搜索](https://cloud.tencent.com/product/es?from=10680)的，比如Email内容、产品描述，应该使用text类型。设置text类型以后，字段内容会被分析，在生成倒排索引以前，字符串会被分析器分成一个一个词项。text类型的字段不用于排序，很少用于聚合。 　　
 
-  keyword keyword类型适用于索引结构化的字段，比如email地址、主机名、状态码和标签。如果字段需要进行过滤(比如查找已发布博客中status属性为published的文章)、排序、聚合。keyword类型的字段只能通过精确值搜索到。
+  keyword：keyword类型适用于索引结构化的字段，比如email地址、主机名、状态码和标签。如果字段需要进行过滤(比如查找已发布博客中status属性为published的文章)、排序、聚合。keyword类型的字段只能通过精确值搜索到。
 
 - 整数类型
 
@@ -7202,11 +7097,13 @@ Unix 有五种 I/O 模型：
 
 ### Linux
 
-#### Docker
-
 #### 常见指令
 
+##### Docker
+
 - docker top 容器ID：查看docker容器内运行线程
+- docker run -it -v /宿主机目录:/容器目录 镜像名:镜像标签
+- 
 
 ### Spring
 
@@ -7356,9 +7253,7 @@ Unix 有五种 I/O 模型：
 
   - BeanDefinitionRegistry：定义了与BeanDefiniton相关的操作，如`registerBeanDefinition`，`getBeanDefinition`，在BeanFactory中，实现类就是DefaultListableBeanFactory。
 
-  - BeanDefinitionRegistryPostProcessor：
-
-  - 该接口只定义了一个功能：处理BeanDefinitonRegistry，也就是解析配置类中的Import、Component、ComponentScan等注解进行相应的处理，处理完毕后将这些类注册成对应的BeanDefinition
+  - BeanDefinitionRegistryPostProcessor：该接口只定义了一个功能：处理BeanDefinitonRegistry，也就是解析配置类中的Import、Component、ComponentScan等注解进行相应的处理，处理完毕后将这些类注册成对应的BeanDefinition
 
     在Spring内部中，只有一个实现：ConfigurationClassPostProcessor。
 
@@ -7379,7 +7274,7 @@ Unix 有五种 I/O 模型：
 BeanFactory和ApplicationContext的区别：
 
 - BeanFactroy 采用的是延迟加载形式来注入 Bean 的，即只有在使用到某个 Bean 时(调用 getBean())，才对该 Bean 进行加载实例化。这样，我们就不能发现一些存在的 spring 的配置 问题。而 ApplicationContext 则相反，它是在容器启动时，一次性创建了所有的 Bean。这 样，在容器启动时，我们就可以发现 Spring 中存在的配置错误。
-- ApplicationContext 继承了 BeanFactory，BeanFactory 是 Spring 中比较原始的 Factory，它不支持 AOP、Web 等 Spring 插件。而 ApplicationContext 不仅包含了 BeanFactory 的所有功能，还支持 Spring 的各种插件，还以一种面向框架的方式工作以及对上下文进行分层和实 现继承。 BeanFactory 是 Spring 框架的基础设施，面向 Spring 本身；而 ApplicationContext 面向使用 Spring 的开发者，相比 BeanFactory 提供了更多面向实际应用的功能，几乎所有场合都可以直接使 用 ApplicationContext，而不是底层的 BeanFactory。
+- ApplicationContext 继承了 BeanFactory，BeanFactory 是 Spring 中比较原始的 Factory，它不支持 AOP、Web 等 Spring 插件。而 ApplicationContext 不仅包含了 BeanFactory 的所有功能，还支持 Spring 的各种插件，还以一种面向框架的方式工作以及对上下文进行分层和实现继承。 BeanFactory 是 Spring 框架的基础设施，面向 Spring 本身；而 ApplicationContext 面向使用 Spring 的开发者，相比 BeanFactory 提供了更多面向实际应用的功能，几乎所有场合都可以直接使 用 ApplicationContext，而不是底层的 BeanFactory。
 
 ##### 三级缓存
 
@@ -7483,17 +7378,17 @@ BeanFactory和ApplicationContext的区别：
 
   总：spring的事务是由AOP实现的，首先要生成具体的代理对象，然后按照AOP的整套流程来执行具体的操作逻辑，正常情况下要通过通知来完成核心功能，但是事务不是通过通知来实现的，而是通过一个TransactionInterceptor来实现的，然后调用Invoke来实现具体的逻辑。
 
-  分：1、先做准备工作，解析各个方法是事务的相关属性，根据具体的属性来判断是否开启事务
+  分：1、先做准备工作，解析各个方法是事务的相关属性，根据具体的属性来判断是否开启事务。
 
-  ​		2、当需要开启的时候，获取数据库连接，关闭自动提交功能，开启事务
+  ​		2、当需要开启的时候，获取数据库连接，关闭自动提交功能，开启事务。
 
-  ​		3、执行具体的sql逻辑
+  ​		3、执行具体的sql逻辑。
 
-  ​		4、在操作过程中，如果执行失败了，那么会通过completeTransactionAfterThrowing来完成事务的回滚，回滚的具体逻辑是通过doRollBack方法来实现的，实现的时候也是先获取连接对象，然后通过连接对象进行回滚
+  ​		4、在操作过程中，如果执行失败了，那么会通过completeTransactionAfterThrowing来完成事务的回滚，回滚的具体逻辑是通过doRollBack方法来实现的，实现的时候也是先获取连接对象，然后通过连接对象进行回滚。
 
-  ​		5、如果执行过程中没有任何意外发生，那么通过commitTransactionAfterReturning来完成事务的提交，提交的具体逻辑是通过doCommit方法来实现的，实现的时候也是先获取连接对象，然后通过连接对象进行提交
+  ​		5、如果执行过程中没有任何意外发生，那么通过commitTransactionAfterReturning来完成事务的提交，提交的具体逻辑是通过doCommit方法来实现的，实现的时候也是先获取连接对象，然后通过连接对象进行提交。
 
-  ​		6、当事务执行完毕需要清楚相关的事务信息cleanupTransactionInfo
+  ​		6、当事务执行完毕需要清楚相关的事务信息cleanupTransactionInfo。
 
 - Spring事务的传播特性
 
@@ -7534,6 +7429,69 @@ BeanFactory和ApplicationContext的区别：
   Cglib动态代理：cglib是针对类实现代理，主要是对指定的类生成一个子类，覆盖其中的方法。
 
   ![](img/Cglib%E5%8A%A8%E6%80%81%E4%BB%A3%E7%90%86.png)
+
+JDK 动态代理是通过实现目标类的接口，然后将目标类在构造动态代理时作为参数传入，使代理对象持有目标对象，再通过代理对象的 InvocationHandler 实现动态代理的操作。 CGLIB 动态代理是通过配置目标类信息，然后利用 ASM 字节码框架进行生成目标类的子类。当调用代理方法时，通过拦截方法的方式实现代理的操作。 总的来说，JDK 动态代理利用接口实现代理，CGLIB 动态代理利用继承的方式实现代理。
+
+#### Spring事务
+
+**方法事务为默认的REQUIRED。**
+
+##### 事务类型
+
+##### 失效场景
+
+- 数据库引擎不支持，mysql需要InnoDB。
+
+- 方法必须是public的。
+
+  事务是利用Spring Aop代理，获取Transactional 注解的事务配置信息，不是 public则不会获取@Transactional 的属性配置信息。
+
+- 方法必须是被其他类调用。
+
+- @Transitional默认是捕获运行时异常（继承RuntimeException）才回滚，所以如果想要捕获所有异常都回滚，需要在@Transitional后面加上(rollbackFor=Exception.class)。
+
+- 需要抛出异常，才会回滚，如果你已经自己把异常捕获了，但是没有继续往外抛，那么也是不会回滚的。
+
+##### 事务嵌套
+
+事务嵌套：就是事务方法A调用事务方法B，外层调用方法和内层被调用方法都是事务方法的情况。
+
+一般我们不关心外层调用方法的事务传播行为（用默认的（不指定就行））。而只关心内层被调用方法的传播行为。
+
+会有以下三种需求：
+
+1. 外层调用方法和内层被调用方法，有异常一起回滚，没问题一起提交。（共用一个事务）
+2. 内层被调用方法回滚与否，不会影响外层调用方法。而外层调用方法出异常回滚，也不会回滚内层被调用方法（两个独立的事务）
+3. 内层被调用方法回滚与否，不会影响外层调用方法。而外层调用方法出异常回滚，也会回滚内层被调用方法（嵌套事务）
+
+这三种情况正好对应三种最常用的传播行为：
+
+1、@Transactional(propagation=Propagation.REQUIRED) ：内外层方法共用外层方法的事务。
+
+2、@Transactional(propagation=Propagation.REQUIRES_NEW) ：当执行内层被调用方法时，外层方法的事务会挂起。两个事务相互独立，不会相互影响。
+
+3、@Transactional(propagation=Propagation.NESTED) :
+
+理解Nested的关键是savepoint。他与PROPAGATION_REQUIRES_NEW的区别是：PROPAGATION_REQUIRES_NEW另起一个事务，将会与他的父事务相互独立，而Nested的事务和他的父事务是相依的，他的提交是要等和他的父事务一块提交的。也就是说，如果父事务最后回滚，他也要回滚的。
+
+```
+class ServiceA {
+
+ public void methodA() {
+    // 数据库操作等其他代码
+    try {
+            // savepoint（虚拟的）
+            ServiceB.methodB(); // PROPAGATION_NESTED 级别
+         } catch (SomeException) {
+             // 执行其他业务, 如ServiceC.methodC();
+         }
+     // 其他操作代码
+     }
+}
+也就是说ServiceB.methodB失败回滚，那么ServiceA.methodA也会回滚到savepoint点上，ServiceA.methodA可以选择另外一个分支，比如ServiceC.methodC，继续执行，来尝试完成自己的事务。
+```
+
+
 
 #### SpringBoot注解
 
@@ -7668,6 +7626,8 @@ CAP原则又称CAP定理，指的是在一个分布式系统中，`Consistency�
 BASE理论的核心思想是：
 
 > 即使无法做到强一致性（Strong consistency），但每个应用都可以根据自身的业务特点，采用适当的方式来使系统达到最终一致性（Eventual consistency）。
+>
+> 最终一致性的系统中，数据的读出来的不一定是最新的，也就是一种软状态，即一种短暂的临时状态。
 
 CAP 是分布式系统设计理论，BASE 是 CAP 理论中 AP 方案的延伸，ACID 是数据库事务完整性的理论。
 
@@ -7735,6 +7695,42 @@ Saga是针对分布式长活事务的解决方案，针对事务长、多、复�
 
 Seata 提供了 AT、TCC、SAGA 和 XA 四种事务模式，可以快速有效地对分布式事务进行控制。
 
+Seata 对分布式事务的协调和控制，主要是通过 XID 和 3 个核心组件实现的。
+
+- XID：XID 是全局事务的唯一标识，它可以在服务的调用链路中传递，绑定到服务的事务上下文中。
+
+- 三个组件：
+
+  - TC（Transaction Coordinator）：事务协调器，它是事务的协调者（这里指的是 Seata 服务器），主要负责维护全局事务和分支事务的状态，驱动全局事务提交或回滚。
+  - TM（Transaction Manager）：事务管理器，它是事务的发起者，负责定义全局事务的范围，并根据 TC 维护的全局事务和分支事务状态，做出开始事务、提交事务、回滚事务的决议。
+  - RM（Resource Manager）：资源管理器，它是资源的管理者（这里可以将其理解为各服务使用的数据库）。它负责管理分支事务上的资源，向 TC 注册分支事务，汇报分支事务状态，驱动分支事务的提交或回滚。
+
+  以上三个组件相互协作，TC 以 Seata 服务器（Server）形式独立部署，TM 和 RM 则是以 Seata Client 的形式集成在微服务中运行。
+
+
+
+![](img/seata.png)
+
+Seata 的整体工作流程如下：
+
+1. TM 向 TC 申请开启一个全局事务，全局事务创建成功后，TC 会针对这个全局事务生成一个全局唯一的 XID；
+2. XID 通过服务的调用链传递到其他服务;
+3. RM 向 TC 注册一个分支事务，并将其纳入 XID 对应全局事务的管辖；
+4. TM 根据 TC 收集的各个分支事务的执行结果，向 TC 发起全局事务提交或回滚决议；
+5. TC 调度 XID 下管辖的所有分支事务完成提交或回滚操作。
+
+###### 四种模式
+
+Seata 提供了 AT、TCC、SAGA 和 XA 四种事务模式，可以快速有效地对分布式事务进行控制。
+
+###### AT
+
+任何应用想要使用 Seata 的 AT 模式对分布式事务进行控制，必须满足以下 2 个前提：
+
+- 必须使用支持本地 ACID 事务特性的关系型数据库，例如 MySQL、Oracle 等；
+- 应用程序必须是使用 JDBC 对数据库进行访问的 JAVA 应用。
+- 还需要针对业务中涉及的各个数据库表，分别创建一个 UNDO_LOG（回滚日志）表。
+
 #### 分布式系统排错
 
 ##### 定位问题
@@ -7744,6 +7740,12 @@ Seata 提供了 AT、TCC、SAGA 和 XA 四种事务模式，可以快速有效�
 - 分布式链路跟踪系统
 
   将一次分布式请求还原为一个完整的调用链路，可以在整个调用链路中跟踪到这一次分布式请求的每一个环节的调用情况，比如调用是否成功，返回什么异常，调用的哪个服务节点以及请求耗时等等。
+  
+  每个请求都使用一个`唯一标识`来追踪全部的链路显示在日志中（根据spandId去找出现问题的上下游服务）。
+  
+- MDC
+
+  MDC（Mapped Diagnostic Context，映射调试上下文）是 log4j 和 logback 提供的一种方便在多线程条件下记录日志的功能。MDC 可以看成是一个与当前线程绑定的Map，可以往其中添加键值对。MDC 中包含的内容可以被同一线程中执行的代码所访问。当前线程的子线程会继承其父线程中的 MDC 的内容。当需要记录日志时，只需要从 MDC 中获取所需的信息即可。MDC 的内容则由程序在适当的时候保存进去。对于一个 Web 应用来说，通常是在请求被处理的最开始保存这些数据。
 
 ### 消息队列
 
@@ -7829,56 +7831,7 @@ Seata 提供了 AT、TCC、SAGA 和 XA 四种事务模式，可以快速有效�
   	}
   ```
 
-- **ceil**的英文意义是天花板，该方法就**表示向上取整**，Math.ceil(11.3)的结果为12,Math.ceil(-11.3)的结果是-11；**floor**的英文意义是地板，该方法就**表示向下取整**，Math.ceil(11.6)的结果为11,Math.ceil(-11.6)的结果是-12；最难掌握的是**round**方法，它表示**“四舍五入”**，算法为Math.floor(x+0.5)，**即将原来的数字加上0.5后再向下取整**，所以，Math.round(11.5)的结果为12，Math.round(-11.5)的结果为-11。
-
-- **Comparable是排序接口**。若一个类实现了Comparable接口，就意味着该类支持排序。实现了Comparable接口的类的对象的列表或数组可以通过Collections.sort或Arrays.sort进行自动排序。此接口只有一个方法compare，比较此对象与指定对象的顺序，如果该对象小于、等于或大于指定对象，则分别返回负整数、零或正整数。
-
-  ```
-  public class Person implements Comparable<Person>
-  {
-      String name;
-      int age;
-     
-      @Override
-      public int compareTo(Person p)
-      {
-          return this.age-p.getAge();
-      }
-  }
   
-  Arrays.sort(people);
-  ```
 
-  **Comparator是比较接口**，我们如果需要控制某个类的次序，而该类本身不支持排序(即没有实现Comparable接口)，那么我们就可以建立一个“该类的比较器”来进行排序，这个“比较器”只需要实现Comparator接口即可。也就是说，我们可以通过实现Comparator来**新建一个比较器**，然后通过这个比较器对类进行排序。
 
-  ```
-  public class PersonCompartor implements Comparator<Person>
-  {
-      @Override
-      public int compare(Person o1, Person o2)
-      {
-          return o1.getAge()-o2.getAge();
-      }
-  }
-  
-  Arrays.sort(people,new PersonCompartor());
-  ```
-
-  **比较：**
-
-  Comparable是排序接口，若一个类实现了Comparable接口，就意味着“该类支持排序”。而Comparator是比较器，我们若需要控制某个类的次序，可以建立一个“该类的比较器”来进行排序。
-
-  Comparable相当于“内部比较器”，而Comparator相当于“外部比较器”。
-
-  两种方法各有优劣， 用Comparable 简单， 只要实现Comparable 接口的对象直接就成为一个可以比较的对象，但是需要修改源代码。 用Comparator 的好处是不需要修改源代码， 而是另外实现一个比较器， 当某个自定义的对象需要作比较的时候，把比较器和对象一起传递过去就可以比大小了， 并且在Comparator 里面用户可以自己实现复杂的可以通用的逻辑，使其可以匹配一些比较简单的对象，那样就可以节省很多重复劳动了。
-
-- 深拷贝和浅拷贝
-
-  深拷贝会另外创造一个一模一样的对象，新对象跟原对象不共享内存，修改新对象不会改到原对象，是“值”而不是“引用”（不是分支）。
-
-  浅拷贝只复制指向某个对象的指针，而不复制对象本身，新旧对象还是共享同一块内存（分支）。
-
-  clone()方法是浅拷贝。
-
-  如果想要实现深拷贝，可以重写clone()方法。还可以通过构造方法和序列化实现深拷贝。
 
