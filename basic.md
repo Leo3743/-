@@ -616,6 +616,8 @@ LockSupport使用park()和unpark()来挂起和唤醒线程，LockSupport很类�
 
 **线程如果因为调用park而阻塞的话，能够响应中断请求(中断状态被设置成true)，但是不会抛出InterruptedException**。
 
+LockSuport主要是针对Thread进进行阻塞处理，可以指定阻塞队列的目标对象，每次可以指定具体的线程唤醒。Object.wait()是以对象为纬度，阻塞当前的线程和唤醒单个(随机)或者所有线程。
+
 ##### 线程和进程区别
 
 一个进程拥有多个线程、堆和方法区。
@@ -2662,6 +2664,32 @@ NIO的核心：Channels、Buffers、Selectors
 - Buffer 和数组差不多，它有 position、limit、capacity 几个重要属性。put() 一下数据、flip() 切换到读模式、然后用 get() 获取数据、clear() 一下清空数据、重新回到 put() 写入数据。
 - Channel 基本上只和 Buffer 打交道，类似 IO 中的流，用于读取和写入。最重要的接口就是 channel.read(buffer) 和 channel.write(buffer)。
 - Selector 用于实现非阻塞 IO，用于实现一个线程管理多个 Channel。
+
+#### Buffers
+
+##### MappedByteBuffer
+
+系统IO调用：
+
+![](img/%E7%B3%BB%E7%BB%9F%EF%BD%89%EF%BD%8F.png)
+
+内存映射IO调用：
+
+![](img/%E5%86%85%E5%AD%98%E6%98%A0%E5%B0%84IO.png)
+
+##### DirectByteBuffer
+
+DirectByteBuffer 对象的内存分配 allocateMemory() 是一个native方法，即不是jvm控制的内存区域，通常称为堆外内存，一般是通过c/c++分配的内存（malloc）。
+
+HeapByteBuffer是堆上的ByteBuffer对象，属于jvm控制的范围。
+
+为什么对io的操作都需要将jvm内存区的数据拷贝到堆外内存呢？
+
+是因为jvm需要进行GC，如果io设备直接和jvm堆上的数据进行交互，这个时候jvm进行了GC，jvm堆上正在IO的数据发生了位置移动，这样会导致正在进行的io操作相关的数据全部乱套。
+
+**堆外内存释放**：堆外内存只有在DirectByteBuffer回收掉之后才有机会被回收。每个DirectByteBuffer关联着其对应的Cleaner，Cleaner是PhantomReference的子类，虚引用主要被用来跟踪对象被垃圾回收的状态，通过查看ReferenceQueue中是否包含对象所对应的虚引用来判断它是否即将被垃圾回收。当GC时发现DirectByteBuffer除了PhantomReference外已不可达，就会把它放进 Reference类pending list静态变量里。然后另有一条ReferenceHandler线程，名字叫 "Reference Handler"的，关注着这个pending list，如果看到有对象类型是Cleaner，就会执行它的clean()，释放堆外内存。
+
+------
 
 Channels：FileChannel、DatagramChannel、SocketChannel、ServerSocketChannel
 
