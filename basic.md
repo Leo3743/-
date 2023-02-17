@@ -3564,6 +3564,30 @@ IOC是控制反转的意思，也就将程序中对象的创建交给IOC容器�
 
 ##### ObjectFactory
 
+#### 缓存map
+
+- 1)singletonObjects是beanName与beanInstance的Map，是真正的缓存，beanInstance是构造完毕的，凡是正常地构造完毕的单例bean都会放入缓存中。
+- 2)earlySingletonObjects也是beanName与beanInstance的Map，beanInstance是已经调用了createBean方法，但是没有清除加载状态（从singletonsCurrentlyInCreation中移除）和加入至缓存的bean。仅在当前bean创建时存在，用于检测代理bean循环依赖。
+- 3)singleFactories是beanName与ObjectFactory的Map，仅在当前bean创建时存在，是尚未调用createBean的bean。用于setter循环依赖时实现注入。
+- 4)registeredSingletons：用来保存当前所有已注册的bean。
+
+#### 循环依赖
+
+构造器注入会导致循坏依赖，而注解注入和setter注入不会，这是因为：
+
+- 1)调用doCreateBean时，会采用构造方法初始化的方式，此时会递归地初始化构造方法参数bean。因为是构造方法初始化，所以递归获取参数bean是在将自己放入singletonFactories之前。
+- 2)正因为没有将自己放入singletonFactories，所以不会在getBean从singletonFactories返回已经创建过的bean。
+
+##### 存在代理时的循环依赖
+
+此时就与earlySIngletonObjects有关系了。
+
+- 1)getBean(A)时，将A加入了singletonFactories，注入属性时setter注入B，调用getBean(B)
+- 2)调用getBean(B)时，将B加入了singletonFactories，注入属性时setter注入A，调用getBean(A)
+- 3)因为A已经存在在singletonFactories，于是取出，调用getObject，然后将A加入到earlySIngletonObjects，返回A。
+- 4)B注入属性A完毕后，B构造完毕，将B加入singletonObjects，从 earlySIngletonObjects和singletonFactories中移除B
+- 5)A注入属性B完毕后，执行BeanPostProcessor，此时A变为了Object（CurrentA)。检测代理bean循环依赖，发现singletonObjects中存在Cached A，于是取出，将CachedA 与 CurrentA比较，发现不同，然后发现有B依赖着Cached A，数据发生不一致，抛出异常。
+
 ### Spring AOP
 
 AOP是面向切面编程，能够将那些与业务无关，却为业务模块所共同调用的逻辑或责任（例如事务处理、日志管理、权限控制等）封装起来，便于减少系统的重复代码，降低模块间的耦合度，并有利于未来的可拓展性和可维护性。
@@ -3696,6 +3720,20 @@ Scan底层是遍历hashMap。
 - Scan 采用 逆二进制迭代法来计算游标，主要为了兼容Rehash的情况
 - Scan 为了兼容缩容后不漏掉数据，会出现重复遍历。
   - 即客户端需要做去重处理
+
+### 乐观锁
+
+watch+multi+exec
+
+watch监视某个key的变化；multi开启事务；exec提交事务。
+
+![](img/redis乐观锁.png)
+
+例子：
+
+![](img/redis乐观锁事务提交.png)
+
+**注意：redis乐观锁并不会造成ABA问题，因为watch不仅会判断监视key前后是否相同，而是判断该key是否被修改过。**
 
 ### 分布式锁
 
